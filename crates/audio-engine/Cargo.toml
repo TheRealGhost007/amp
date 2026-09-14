@@ -1,0 +1,11 @@
+[package]
+name = "audio-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "GStreamer-backed playback engine: decode, gapless, crossfade, EQ, device selection — no Tauri awareness"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

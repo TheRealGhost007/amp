@@ -1,0 +1,11 @@
+:root {
+  color-scheme: light dark;
+}
+
+.app-shell {
+  padding: 2rem;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
