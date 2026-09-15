@@ -131,6 +131,12 @@ export const library = {
   search: (query: string) => listOrEmpty<TrackListItem>("library_search", { query }),
 };
 
+export const favorites = {
+  isFavorite: (trackId: number) => invoke<boolean>("favorites_is_favorite", { trackId }),
+  toggle: (trackId: number) => invoke<boolean>("favorites_toggle", { trackId }),
+  listIds: () => listOrEmpty<number>("favorites_list_ids"),
+};
+
 export const settings = {
   get: <T>(key: string) => invoke<T | null>("get_setting", { key }),
   set: <T>(key: string, value: T) => invoke<void>("set_setting", { key, value }),

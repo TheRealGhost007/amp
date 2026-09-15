@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import { onPlayerEvent, onPlayerPosition, player, type TrackRef } from "../lib/ipc";
+import {
+  favorites,
+  onPlayerEvent,
+  onPlayerPosition,
+  player,
+  type TrackRef,
+} from "../lib/ipc";
 
 interface PlaybackStore {
   currentTrack: TrackRef | null;
@@ -8,6 +14,7 @@ interface PlaybackStore {
   durationMs: number | null;
   volume: number;
   muted: boolean;
+  isFavorite: boolean;
   /** Human-readable message from the last backend error event, if any —
    * cleared on the next successful state change. */
   error: string | null;
@@ -22,6 +29,7 @@ interface PlaybackStore {
   seek: (positionMs: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
+  toggleFavorite: () => Promise<void>;
 }
 
 function isAudioUnavailable(error: unknown): boolean {
@@ -33,6 +41,15 @@ function isAudioUnavailable(error: unknown): boolean {
   );
 }
 
+async function fetchFavoriteStatus(track: TrackRef | null): Promise<boolean> {
+  if (!track) return false;
+  try {
+    return await favorites.isFavorite(track.id);
+  } catch {
+    return false;
+  }
+}
+
 export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
   currentTrack: null,
   isPlaying: false,
@@ -40,6 +57,7 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
   durationMs: null,
   volume: 1,
   muted: false,
+  isFavorite: false,
   error: null,
   audioUnavailable: false,
 
@@ -51,6 +69,7 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
         isPlaying: status.is_playing,
         positionMs: status.position_ms ?? 0,
         durationMs: status.duration_ms,
+        isFavorite: await fetchFavoriteStatus(status.current_track),
       });
     } catch (error) {
       if (isAudioUnavailable(error)) set({ audioUnavailable: true });
@@ -70,11 +89,14 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
           break;
         case "TrackAdvanced": {
           const status = await player.status();
-          set({ currentTrack: status.current_track });
+          set({
+            currentTrack: status.current_track,
+            isFavorite: await fetchFavoriteStatus(status.current_track),
+          });
           break;
         }
         case "PlaybackFinished":
-          set({ currentTrack: null, isPlaying: false, positionMs: 0 });
+          set({ currentTrack: null, isPlaying: false, positionMs: 0, isFavorite: false });
           break;
         case "Error":
           set({ error: event.data });
@@ -93,6 +115,7 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
   playNow: async (track) => {
     await player.playNow(track);
     set({ currentTrack: track, isPlaying: true, error: null });
+    set({ isFavorite: await fetchFavoriteStatus(track) });
   },
 
   togglePlayPause: async () => {
@@ -119,5 +142,12 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
   setMuted: async (muted) => {
     await player.setMuted(muted);
     set({ muted });
+  },
+
+  toggleFavorite: async () => {
+    const { currentTrack } = get();
+    if (!currentTrack) return;
+    const isFavorite = await favorites.toggle(currentTrack.id);
+    set({ isFavorite });
   },
 }));

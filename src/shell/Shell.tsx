@@ -12,6 +12,7 @@ import { RecentlyPlayed } from "../views/RecentlyPlayed";
 import { Queue } from "../views/Queue";
 import { Downloads } from "../views/Downloads";
 import { Settings } from "../views/Settings";
+import { PlayerDock } from "../player/PlayerDock";
 import "./Shell.css";
 
 const SIDEBAR_COLLAPSED_KEY = "appearance.sidebar_collapsed";
@@ -54,15 +55,18 @@ export function Shell() {
 
   return (
     <div className="op-shell">
-      <Sidebar
-        activeView={activeView}
-        collapsed={collapsed}
-        onNavigate={setActiveView}
-        onToggleCollapsed={toggleCollapsed}
-      />
-      <main className="op-shell__main">
-        <ActiveView />
-      </main>
+      <div className="op-shell__body">
+        <Sidebar
+          activeView={activeView}
+          collapsed={collapsed}
+          onNavigate={setActiveView}
+          onToggleCollapsed={toggleCollapsed}
+        />
+        <main className="op-shell__main">
+          <ActiveView />
+        </main>
+      </div>
+      <PlayerDock onOpenQueue={() => setActiveView("queue")} />
     </div>
   );
 }

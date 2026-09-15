@@ -1,6 +1,8 @@
 /**
- * Flexbox rather than `grid-template-columns: auto 1fr`: the latter
- * needs the auto track to continuously track the sidebar's own
+ * Column: sidebar+content row on top, the persistent mini-player
+ * spanning the full width underneath (spec §9). Flexbox rather than
+ * `grid-template-columns: auto 1fr` for the sidebar/main split — the
+ * latter needs the auto track to continuously track the sidebar's own
  * transitioning `width`, which this WebKitGTK version doesn't size
  * reliably (the track collapsed to icon-only width regardless of the
  * sidebar's actual computed width). Flex with `flex-shrink: 0` on the
@@ -8,8 +10,15 @@
  */
 .op-shell {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
+}
+
+.op-shell__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
 }
 
 .op-shell__main {

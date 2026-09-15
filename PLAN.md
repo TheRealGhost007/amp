@@ -66,7 +66,21 @@ plan file's existence means work happened.
       to 7.27s. Verified on-device: 50k songs, 500 albums, 500 artists,
       correct counts/sorting, ~28 DOM nodes mounted regardless of list
       size, 44ms full browse query.
-- [ ] **Phase 7 — Now Playing / Mini-Player / Full Player**.
+- [x] **Phase 7 — Now Playing / Mini-Player / Full Player**: one shared
+      component tree (`MiniPlayer` + `FullPlayer`, connected by
+      `PlayerDock`) rather than four separate implementations, since the
+      spec's compact/bottom states overlap heavily with mini/full.
+      `framer-motion` shared-element transition (`layoutId=
+      "now-playing-artwork"`) between them; `MotionConfig
+      reducedMotion="user"` for global prefers-reduced-motion. Real
+      favorites wiring (3 new IPC commands over `player-core`'s
+      Phase-2 favorites table, previously unused by any UI). New
+      `useNowPlaying.test.tsx` covering the hook's index/boundary logic.
+      Deliberate scope decision: Previous/Next fall back to adjacent
+      track in library sort order until Phase 8 builds a real queue.
+      Verified on-device with real playing audio and real library data;
+      Zustand store confirmed as the only source of truth (neither
+      component keeps its own copy of playback state).
 - [ ] **Phase 8 — Queue & Playlists**: drag-reorder, CRUD.
 - [ ] **Phase 9 — Command Palette & Context Menus**.
 - [ ] **Phase 10 — Metadata Editor & Artwork Editing**.

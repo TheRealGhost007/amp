@@ -460,6 +460,68 @@ rows are display-only — no click-through to a filtered/detail view yet.
 That's a better fit for the album/artist detail pages a later phase
 should build than for search-query hijacking bolted on here.
 
+## Phase 7: now playing, mini-player, full player
+
+**One component tree, not four.** The spec's §8/§9 describe full-screen,
+compact, bottom, and mini player states, but compact/bottom overlap so
+heavily with mini/full that building all four as separate implementations
+would just be four copies of the same transport logic with different CSS.
+Built two real states — `MiniPlayer` (persistent bottom bar, always
+mounted in `Shell.tsx`) and `FullPlayer` (a `position: fixed; inset: 0`
+overlay) — connected by `PlayerDock`, which owns exactly one piece of
+state (`expanded: boolean`) and nothing about playback itself.
+`usePlaybackStore` remains the single source of truth for
+track/position/playing state, read identically by both components — this
+was the phase's explicit exit criterion, and it holds: neither component
+keeps its own copy of `isPlaying`/`positionMs`.
+
+**Shared-element transition**: both components wrap their `Artwork` in a
+`motion.div layoutId="now-playing-artwork"`; `framer-motion` handles the
+FLIP animation between the mini-player's 44px artwork and the full
+player's 360px artwork automatically from that shared `layoutId`, no
+manual position math. Global `prefers-reduced-motion` handling is one
+`<MotionConfig reducedMotion="user">` wrapping the whole app in `App.tsx`
+— `"user"` (not `"always"`) respects the OS setting rather than forcing
+reduced motion unconditionally, matching spec §18's intent.
+
+**Favorites** (`player-core`'s favorites table existed since Phase 2 but
+had no UI until now): three thin `src-tauri` commands
+(`favorites_is_favorite`/`favorites_toggle`/`favorites_list_ids`), with
+`favorites_toggle` returning the new state so the frontend doesn't need a
+round-trip re-check. `playbackStore` fetches favorite status on `init()`
+and on every track change (`playNow`, `TrackAdvanced`, `PlaybackFinished`
+events) so the heart icon is always correct for whatever's actually
+playing, not stale from the previous track.
+
+**Deliberate scope decision — no real queue yet**: `useNowPlaying`'s
+Previous/Next fall back to "adjacent track in the current library sort
+order" (`tracks.findIndex` against `LibraryContext`), documented inline
+in the hook. This is a real, honest behavior — not a fake placeholder —
+but it's explicitly provisional: Phase 8 builds an actual queue, and
+Previous/Next should switch to walking that queue instead once it
+exists.
+
+**Process lesson, not a product bug**: while verifying on-device, the
+mini-player briefly appeared to have a track-lookup bug (showed "Nothing
+playing" despite a visibly advancing progress bar). A temporary
+`console.error` in `MiniPlayer.tsx` showed `currentTrack` was genuinely
+`null` — the short test clip used for verification had already reached a
+real `PlaybackFinished` event before the screenshot was taken. Correct
+behavior; the verification harness was wrong, not the app. Fixed by
+looping the test clip (`setInterval(() => player.seek(0), 2000)`) rather
+than touching any application code. Worth remembering: confirm a
+"bug" is real before fixing it — a plausible-looking failure during
+manual verification can be an artifact of the verification setup itself.
+
+**New test**: `useNowPlaying.test.tsx` covers the hook's actual branching
+logic (index lookup, both list-boundary conditions, a current-track-id
+no-longer-in-the-library case, and that `playNext`/`playPrevious` call
+`playNow` with the correct neighbor's file URI) with the library/store
+dependencies mocked — `MiniPlayer`/`FullPlayer` themselves are thin
+presentational wiring over already-tested store/hook logic and existing
+primitives, so the hook is where the real logic (and the real test value)
+lives.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

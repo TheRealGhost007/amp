@@ -1,3 +1,4 @@
+import { MotionConfig } from "framer-motion";
 import { useEffect } from "react";
 import { ToastProvider } from "./components";
 import { LibraryProvider } from "./context/LibraryContext";
@@ -17,11 +18,13 @@ function App() {
   }, []);
 
   return (
-    <ToastProvider>
-      <LibraryProvider>
-        <Shell />
-      </LibraryProvider>
-    </ToastProvider>
+    <MotionConfig reducedMotion="user">
+      <ToastProvider>
+        <LibraryProvider>
+          <Shell />
+        </LibraryProvider>
+      </ToastProvider>
+    </MotionConfig>
   );
 }
 

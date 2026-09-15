@@ -93,6 +93,9 @@ pub fn run() {
             commands::library::library_list_albums,
             commands::library::library_list_artists,
             commands::library::library_search,
+            commands::favorites::favorites_is_favorite,
+            commands::favorites::favorites_toggle,
+            commands::favorites::favorites_list_ids,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
