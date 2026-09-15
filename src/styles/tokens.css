@@ -1,0 +1,76 @@
+/**
+ * Theme-invariant design tokens: type scale, spacing, radius, motion.
+ * Color tokens (which vary per `data-theme`) live in `theme.css`.
+ *
+ * Typography deliberately uses the fonts Omarchy itself ships as its
+ * system defaults (see /etc/fonts/conf.d/50-omarchy.conf: `sans-serif` ->
+ * Liberation Sans, `monospace` -> JetBrainsMono Nerd Font) rather than a
+ * bundled web font, so the app renders in the same faces as the rest of
+ * the desktop instead of looking like an imported web app. The monospace
+ * face is reserved for genuine numeric transport/audio readouts (time,
+ * track/disc numbers, EQ bands, sample rate) — never for arbitrary UI
+ * labels.
+ */
+
+:root {
+  /* ---- Typography ---- */
+  --font-ui: "Liberation Sans", system-ui, -apple-system, "Noto Sans", sans-serif;
+  --font-numeric: "JetBrainsMono Nerd Font", ui-monospace, "JetBrains Mono", monospace;
+
+  /* Named type scale — each step has exactly one job. Not a strict
+     geometric ratio: tuned per role, same approach Omarchy's own shell
+     token system uses (a base size with named, individually-meaningful
+     steps rather than a rigid formula). */
+  --text-caption: 0.6875rem; /* 11px — timestamps, metadata rows */
+  --text-body-sm: 0.8125rem; /* 13px — secondary lists, context menus */
+  --text-body: 0.9375rem; /* 15px — primary reading size */
+  --text-subtitle: 1rem; /* 16px — row titles, section labels */
+  --text-title: 1.25rem; /* 20px — view headings */
+  --text-heading: 1.5rem; /* 24px — section headings */
+  --text-display: 2rem; /* 32px — Now Playing track title */
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+
+  /* ---- Spacing ---- */
+  --space-xxs: 0.25rem; /* 4px */
+  --space-xs: 0.5rem; /* 8px */
+  --space-sm: 0.75rem; /* 12px */
+  --space-md: 1rem; /* 16px */
+  --space-lg: 1.5rem; /* 24px */
+  --space-xl: 2rem; /* 32px */
+  --space-xxl: 3rem; /* 48px */
+  --space-huge: 4rem; /* 64px */
+
+  /* ---- Radius ---- */
+  /* Exactly two, chosen by role, never mixed within a role. */
+  --radius-control: 6px; /* buttons, inputs, chips, menu items */
+  --radius-container: 14px; /* cards, dialogs, panels, artwork frames */
+
+  /* ---- Motion ---- */
+  /* Respect prefers-reduced-motion by zeroing these (see global.css). */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 340ms; /* reserved for the one deliberate set-piece:
+                            mini-player <-> full player */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+  /* ---- Overlay shadow ---- */
+  /* Single shadow token, reserved for genuine overlays (menus, dialogs,
+     tooltips, toasts, dropdowns) — flat surfaces use the background
+     layering scale in theme.css instead of shadows. */
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}

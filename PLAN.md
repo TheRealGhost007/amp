@@ -9,8 +9,13 @@ plan file's existence means work happened.
       Vite scaffold, Cargo workspace (`player-core`, `audio-engine`,
       `linux-integration`, `src-tauri`), ESLint/Prettier/rustfmt/Clippy/
       Vitest all wired and green, git initialized.
-- [ ] **Phase 1 — Design System & Visual Identity**: tokens, three themes,
-      component primitives, product name chosen.
+- [x] **Phase 1 — Design System & Visual Identity**: tokens (type/spacing/
+      radius/motion), three themes (Omarchy Dark pulled live from this
+      machine's colors.toml, Omarchy Light authored companion, AMOLED
+      Dark), 12 component primitives, product named "Amp." Verified
+      on-device: launched, hit the known WebKitGTK/NVIDIA/Wayland crash,
+      fixed with the same workaround already proven in mc-launcher/
+      rgb-control-center, then confirmed rendering via screenshot.
 - [ ] **Phase 2 — Persistence Layer**: SQLite schema + migrations + FTS5.
 - [ ] **Phase 3 — Library Scanning & Metadata**: async scan, `lofty` tags,
       artwork pipeline, incremental rescan.

@@ -1,0 +1,27 @@
+.op-popover {
+  z-index: 100;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-container);
+  box-shadow: var(--shadow-overlay);
+  padding: var(--space-xxs);
+  animation: op-popover-in var(--motion-fast) var(--ease-out);
+}
+
+@keyframes op-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .op-popover {
+    animation: none;
+  }
+}

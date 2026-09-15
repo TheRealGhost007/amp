@@ -1,0 +1,51 @@
+.op-tooltip-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.op-tooltip-anchor::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 100;
+  padding: var(--space-xxs) var(--space-xs);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-overlay);
+  color: var(--fg);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.op-tooltip-anchor--top::after {
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translate(-50%, 2px);
+}
+
+.op-tooltip-anchor--right::after {
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translate(-2px, -50%);
+}
+
+.op-tooltip-anchor:hover::after,
+.op-tooltip-anchor:focus-within::after {
+  opacity: 1;
+  transition-delay: 300ms;
+}
+
+.op-tooltip-anchor--top:hover::after,
+.op-tooltip-anchor--top:focus-within::after {
+  transform: translate(-50%, 0);
+}
+
+.op-tooltip-anchor--right:hover::after,
+.op-tooltip-anchor--right:focus-within::after {
+  transform: translate(0, -50%);
+}

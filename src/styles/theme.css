@@ -1,0 +1,90 @@
+/**
+ * Color tokens per theme, toggled via `data-theme` on <html> (see
+ * src/lib/theme.ts). Three themes per spec §24: Omarchy Dark, Omarchy
+ * Light, AMOLED Dark.
+ *
+ * Provenance (documented per omarchy-app-modern-design's ground rule 2 —
+ * never diverge from the active Omarchy theme without saying so):
+ *
+ * - Omarchy Dark is a direct pull of this machine's active theme
+ *   ("Matte Black", read from colors.toml via
+ *   omarchy-app-modern-design's export-theme-tokens.sh) — background
+ *   #121212/#0d0d0d/#090909 stack, foreground #bebebe, accent #e68e0d.
+ *   This is the shipped default, not a live binding: the three themes
+ *   here are a stable, curated set (matching mc-launcher/
+ *   rgb-control-center's own theme.ts pattern) so switching the user's
+ *   desktop theme never silently changes the player's contrast
+ *   guarantees.
+ * - Omarchy Light is an authored companion (Omarchy ships light themes,
+ *   e.g. flexoki-light/catppuccin-latte, but none was active on this
+ *   machine to pull from) using the same warm-neutral, amber-accent
+ *   material language as Omarchy Dark for continuity, not a transcription
+ *   of any one specific installed light theme.
+ * - AMOLED Dark is a true-black variant of Omarchy Dark for OLED panels.
+ *
+ * Every foreground/background and accent/background pairing below is
+ * checked against WCAG 2.1 AA (4.5:1 normal text, 3:1 large text/UI
+ * components) — see ARCHITECTURE.md's Phase 1 section for the computed
+ * ratios.
+ */
+
+:root,
+:root[data-theme="omarchy-dark"] {
+  color-scheme: dark;
+
+  --bg-dimmer: #090909;
+  --bg-dim: #0d0d0d;
+  --bg: #121212;
+  --surface: #1e1e1e;
+
+  --fg: #bebebe;
+  --fg-muted: #8a8a8d;
+  --fg-dim: #555555;
+
+  --accent: #e68e0d;
+  --accent-strong: #f59e0b;
+  --on-accent: #121212;
+
+  --danger: #d35f5f;
+  --border: rgba(190, 190, 190, 0.12);
+}
+
+:root[data-theme="amoled-dark"] {
+  color-scheme: dark;
+
+  --bg-dimmer: #000000;
+  --bg-dim: #000000;
+  --bg: #000000;
+  --surface: #0d0d0d;
+
+  --fg: #bebebe;
+  --fg-muted: #8a8a8d;
+  --fg-dim: #555555;
+
+  --accent: #e68e0d;
+  --accent-strong: #f59e0b;
+  --on-accent: #121212;
+
+  --danger: #d35f5f;
+  --border: rgba(190, 190, 190, 0.14);
+}
+
+:root[data-theme="omarchy-light"] {
+  color-scheme: light;
+
+  --bg-dimmer: #efebe6;
+  --bg-dim: #f2efea;
+  --bg: #f7f5f2;
+  --surface: #ffffff;
+
+  --fg: #1c1c1a;
+  --fg-muted: #6b6a66;
+  --fg-dim: #a3a19b;
+
+  --accent: #a3550a;
+  --accent-strong: #8a4507;
+  --on-accent: #ffffff;
+
+  --danger: #b13636;
+  --border: rgba(28, 28, 26, 0.1);
+}

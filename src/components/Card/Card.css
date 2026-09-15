@@ -1,0 +1,12 @@
+.op-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-container);
+  padding: var(--space-md);
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.op-card:is(a, button):hover,
+.op-card--interactive:hover {
+  border-color: var(--fg-dim);
+}

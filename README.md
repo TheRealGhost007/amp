@@ -1,7 +1,8 @@
-# omarchy-player
+# Amp
 
-A premium, native music player for Omarchy Linux. Working name — the
-product identity is decided in Phase 1 (design direction), see `PLAN.md`.
+A premium, native music player for Omarchy Linux (repo/crate name
+`omarchy-player`; the product itself is called **Amp** — see
+`ARCHITECTURE.md`'s Phase 1 section for the naming rationale).
 
 Not a Spotify clone. See `ARCHITECTURE.md` for the stack decisions and
 rejected alternatives, and `PLAN.md` for the phased build plan.

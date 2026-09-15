@@ -1,0 +1,47 @@
+.op-toast-viewport {
+  position: fixed;
+  right: var(--space-lg);
+  bottom: var(--space-lg);
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  pointer-events: none;
+}
+
+.op-toast {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-overlay);
+  color: var(--fg);
+  font-size: var(--text-body-sm);
+  animation: op-toast-in var(--motion-base) var(--ease-out);
+}
+
+.op-toast--danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.op-toast--success {
+  border-color: var(--accent);
+}
+
+@keyframes op-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .op-toast {
+    animation: none;
+  }
+}

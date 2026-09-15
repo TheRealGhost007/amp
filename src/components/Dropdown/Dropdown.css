@@ -1,0 +1,19 @@
+.op-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  height: 36px;
+  padding: 0 var(--space-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--fg);
+  font-size: var(--text-body-sm);
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.op-dropdown-trigger:hover {
+  border-color: var(--fg-dim);
+}

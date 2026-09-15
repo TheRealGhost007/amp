@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "omarchy-player",
+  "productName": "Amp",
   "version": "0.1.0",
   "identifier": "com.omarchyplayer.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "omarchy-player",
+        "title": "Amp",
         "width": 800,
         "height": 600
       }
