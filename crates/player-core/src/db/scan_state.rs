@@ -4,7 +4,7 @@
 
 use super::Database;
 use crate::error::Result;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 impl Database {
     pub fn add_scan_root(&self, root_path: &str) -> Result<()> {
@@ -41,6 +41,11 @@ impl Database {
         Ok(())
     }
 
+    /// `Ok(None)` covers two distinct cases: the root exists but has never
+    /// been scanned (`last_scanned_at` is `NULL`), and the root isn't
+    /// tracked at all (no row) — callers don't need to tell those apart,
+    /// so `.optional()` (row-missing) and the nullable column both
+    /// collapse to the same `None`.
     pub fn last_scanned_at(&self, root_path: &str) -> Result<Option<i64>> {
         self.conn
             .query_row(
@@ -48,6 +53,8 @@ impl Database {
                 params![root_path],
                 |row| row.get(0),
             )
+            .optional()
+            .map(Option::flatten)
             .map_err(Into::into)
     }
 }
@@ -87,5 +94,11 @@ mod tests {
         db.add_scan_root("/home/trg/Music").unwrap();
         db.remove_scan_root("/home/trg/Music").unwrap();
         assert!(db.list_scan_roots().unwrap().is_empty());
+    }
+
+    #[test]
+    fn last_scanned_at_of_an_unknown_root_is_none_not_an_error() {
+        let db = Database::open_in_memory().unwrap();
+        assert_eq!(db.last_scanned_at("/never/added").unwrap(), None);
     }
 }

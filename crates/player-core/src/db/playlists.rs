@@ -53,7 +53,12 @@ impl Database {
         Ok(())
     }
 
-    pub fn add_track_to_playlist(&self, playlist_id: i64, track_id: i64) -> Result<()> {
+    /// Returns the new `playlist_tracks` row's own id — callers need it to
+    /// later reorder or remove this specific occurrence, since a track is
+    /// allowed to appear in a playlist more than once (see
+    /// `reorder_playlist`'s doc comment for why that rules out keying by
+    /// `track_id`).
+    pub fn add_track_to_playlist(&self, playlist_id: i64, track_id: i64) -> Result<i64> {
         let next_position: i64 = self.conn.query_row(
             "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_tracks WHERE playlist_id = ?1",
             params![playlist_id],
@@ -63,18 +68,23 @@ impl Database {
             "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
             params![playlist_id, track_id, next_position],
         )?;
-        Ok(())
+        Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn remove_track_from_playlist(&self, playlist_id: i64, track_id: i64) -> Result<()> {
+    /// Removes one occurrence of a track from a playlist, identified by
+    /// its own `playlist_tracks.id` (from `playlist_track_rows`) rather
+    /// than `track_id` — see `reorder_playlist`'s doc comment.
+    pub fn remove_playlist_track(&self, playlist_track_id: i64) -> Result<()> {
         self.conn.execute(
-            "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2",
-            params![playlist_id, track_id],
+            "DELETE FROM playlist_tracks WHERE id = ?1",
+            params![playlist_track_id],
         )?;
         Ok(())
     }
 
-    /// Track ids in a playlist, in position order.
+    /// Track ids in a playlist, in position order. A track appearing
+    /// twice in the same playlist appears twice here too, in whatever
+    /// positions it actually occupies.
     pub fn playlist_track_ids(&self, playlist_id: i64) -> Result<Vec<i64>> {
         let mut stmt = self.conn.prepare(
             "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position ASC",
@@ -84,14 +94,40 @@ impl Database {
             .map_err(Into::into)
     }
 
-    /// Reorders a playlist's tracks to exactly `track_ids_in_order`
-    /// (must be the same set of track ids already in the playlist).
-    pub fn reorder_playlist(&self, playlist_id: i64, track_ids_in_order: &[i64]) -> Result<()> {
-        for (position, track_id) in track_ids_in_order.iter().enumerate() {
+    /// `(playlist_tracks.id, track_id)` pairs, in position order — the
+    /// row id is what `reorder_playlist`/`remove_playlist_track` operate
+    /// on, so a caller that needs to reorder or remove a specific
+    /// occurrence (not just "the playlist's track ids") should use this
+    /// instead of `playlist_track_ids`.
+    pub fn playlist_track_rows(&self, playlist_id: i64) -> Result<Vec<(i64, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, track_id FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position ASC",
+        )?;
+        let rows = stmt.query_map(params![playlist_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    /// Reorders a playlist's tracks to exactly `playlist_track_ids_in_order`
+    /// (must be the same set of `playlist_tracks.id` row ids already in
+    /// the playlist, from `playlist_track_rows`).
+    ///
+    /// Deliberately keyed by each row's own id rather than `track_id`:
+    /// nothing in the schema prevents the same track appearing twice in
+    /// one playlist, and keying by `track_id` would update *every*
+    /// occurrence in one `UPDATE`/`DELETE` statement, making independent
+    /// occurrences of a duplicated track impossible to reorder or remove
+    /// individually.
+    pub fn reorder_playlist(
+        &self,
+        playlist_id: i64,
+        playlist_track_ids_in_order: &[i64],
+    ) -> Result<()> {
+        for (position, playlist_track_id) in playlist_track_ids_in_order.iter().enumerate() {
             self.conn.execute(
                 "UPDATE playlist_tracks SET position = ?1
-                 WHERE playlist_id = ?2 AND track_id = ?3",
-                params![position as i64, playlist_id, track_id],
+                 WHERE playlist_id = ?2 AND id = ?3",
+                params![position as i64, playlist_id, playlist_track_id],
             )?;
         }
         Ok(())
@@ -158,16 +194,50 @@ mod tests {
         let b = insert_track(&db, "/b.mp3");
         let c = insert_track(&db, "/c.mp3");
 
-        db.add_track_to_playlist(playlist.id, a).unwrap();
-        db.add_track_to_playlist(playlist.id, b).unwrap();
-        db.add_track_to_playlist(playlist.id, c).unwrap();
+        let row_a = db.add_track_to_playlist(playlist.id, a).unwrap();
+        let row_b = db.add_track_to_playlist(playlist.id, b).unwrap();
+        let row_c = db.add_track_to_playlist(playlist.id, c).unwrap();
         assert_eq!(db.playlist_track_ids(playlist.id).unwrap(), vec![a, b, c]);
 
-        db.reorder_playlist(playlist.id, &[c, a, b]).unwrap();
+        db.reorder_playlist(playlist.id, &[row_c, row_a, row_b])
+            .unwrap();
         assert_eq!(db.playlist_track_ids(playlist.id).unwrap(), vec![c, a, b]);
 
-        db.remove_track_from_playlist(playlist.id, a).unwrap();
+        db.remove_playlist_track(row_a).unwrap();
         assert_eq!(db.playlist_track_ids(playlist.id).unwrap(), vec![c, b]);
+    }
+
+    #[test]
+    fn a_track_can_appear_twice_and_each_occurrence_is_independently_reorderable_and_removable() {
+        // Regression test: reorder/remove previously keyed off `track_id`,
+        // which the schema allows to repeat within one playlist — a
+        // single UPDATE/DELETE would then hit every occurrence at once,
+        // making independent occurrences impossible to manage.
+        let db = Database::open_in_memory().unwrap();
+        let playlist = db.create_playlist("Repeat", 0).unwrap();
+        let a = insert_track(&db, "/a.mp3");
+        let b = insert_track(&db, "/b.mp3");
+
+        let first_a = db.add_track_to_playlist(playlist.id, a).unwrap();
+        let row_b = db.add_track_to_playlist(playlist.id, b).unwrap();
+        let second_a = db.add_track_to_playlist(playlist.id, a).unwrap();
+        assert_ne!(first_a, second_a);
+        assert_eq!(db.playlist_track_ids(playlist.id).unwrap(), vec![a, b, a]);
+
+        db.reorder_playlist(playlist.id, &[second_a, row_b, first_a])
+            .unwrap();
+        assert_eq!(db.playlist_track_ids(playlist.id).unwrap(), vec![a, b, a]);
+        assert_eq!(
+            db.playlist_track_rows(playlist.id).unwrap(),
+            vec![(second_a, a), (row_b, b), (first_a, a)]
+        );
+
+        db.remove_playlist_track(second_a).unwrap();
+        assert_eq!(db.playlist_track_ids(playlist.id).unwrap(), vec![b, a]);
+        assert_eq!(
+            db.playlist_track_rows(playlist.id).unwrap(),
+            vec![(row_b, b), (first_a, a)]
+        );
     }
 
     #[test]

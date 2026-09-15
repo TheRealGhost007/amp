@@ -1,13 +1,14 @@
 import { Card, EmptyState, MediaRow } from "../components";
 import { usePlaybackStore } from "../store/playbackStore";
+import { useNowPlaying } from "../player/useNowPlaying";
 import { ViewHeader } from "./ViewHeader";
 import "./views.css";
 
 export function Queue() {
-  const currentTrack = usePlaybackStore((s) => s.currentTrack);
+  const { track } = useNowPlaying();
   const isPlaying = usePlaybackStore((s) => s.isPlaying);
 
-  if (!currentTrack) {
+  if (!track) {
     return (
       <div className="op-view">
         <ViewHeader title="Queue" />
@@ -25,9 +26,9 @@ export function Queue() {
       <ViewHeader title="Queue" subtitle="Now playing" />
       <Card>
         <MediaRow
-          artworkSeed={currentTrack.uri}
-          title={`Track #${currentTrack.id}`}
-          subtitle={isPlaying ? "Playing" : "Paused"}
+          artworkSeed={`${track.artist_name ?? "Unknown Artist"} — ${track.album_title ?? track.title}`}
+          title={track.title}
+          subtitle={track.artist_name ?? (isPlaying ? "Playing" : "Paused")}
           active
         />
       </Card>

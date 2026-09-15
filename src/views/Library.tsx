@@ -28,13 +28,25 @@ export function Library() {
       return;
     }
     setSearching(true);
+    let cancelled = false;
     const handle = setTimeout(() => {
       library
         .search(query)
-        .then(setSearchResults)
-        .finally(() => setSearching(false));
+        .then((results) => {
+          // A newer query's own debounce/request could resolve before
+          // this one — e.g. type "cat", pause long enough to fire the
+          // search, then type "s" before it resolves. Without this guard
+          // an older, slower reply can overwrite the newer, correct one.
+          if (!cancelled) setSearchResults(results);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
     }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(handle);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
   }, [query]);
 
   const displayedTracks = searchResults ?? tracks;

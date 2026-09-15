@@ -38,6 +38,9 @@ impl SlotState {
 pub struct SimulatedBackend {
     slots: HashMap<Slot, SlotState>,
     devices: Vec<AudioDevice>,
+    /// URIs that `load` should fail for — lets tests simulate a corrupt or
+    /// deleted file without needing a real, broken audio file on disk.
+    failing_uris: std::collections::HashSet<String>,
 }
 
 impl SimulatedBackend {
@@ -49,7 +52,27 @@ impl SimulatedBackend {
                 name: "Simulated Speakers".into(),
                 is_default: true,
             }],
+            failing_uris: std::collections::HashSet::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub fn fail_load_for_test(&mut self, uri: &str) {
+        self.failing_uris.insert(uri.to_string());
+    }
+
+    #[cfg(test)]
+    pub fn speed_for_test(&self, slot: Slot) -> f64 {
+        self.slots.get(&slot).unwrap().speed
+    }
+
+    #[cfg(test)]
+    pub fn push_error_for_test(&mut self, slot: Slot, message: &str) {
+        self.slots
+            .get_mut(&slot)
+            .unwrap()
+            .pending_events
+            .push(BackendEvent::Error(message.to_string()));
     }
 
     /// Test-only hook: sets the fake duration a slot reports, so a test
@@ -96,6 +119,11 @@ impl Default for SimulatedBackend {
 
 impl Backend for SimulatedBackend {
     fn load(&mut self, slot: Slot, uri: &str) -> Result<()> {
+        if self.failing_uris.contains(uri) {
+            return Err(crate::error::Error::Pipeline(format!(
+                "simulated load failure: {uri}"
+            )));
+        }
         let state = self.slots.get_mut(&slot).unwrap();
         state.uri = Some(uri.to_string());
         state.position_ms = 0;

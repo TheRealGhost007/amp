@@ -107,10 +107,16 @@ pub fn scan_root(db: &Database, cache_dir: &Path, root: &Path) -> Result<ScanSum
         let path = Path::new(&path_str);
         let hash = hash_file(path).ok();
 
+        // Excludes rows already claimed by an earlier `pending_new` entry
+        // in this same scan — without that, two on-disk files sharing one
+        // content hash (e.g. a deleted track duplicated to two new paths)
+        // would both match the same `missing` row, silently repointing it
+        // twice and leaving the second file with no DB row at all.
         let rename_source = hash.as_ref().and_then(|h| {
-            missing
-                .iter()
-                .find(|row| row.content_hash.as_deref() == Some(h.as_str()))
+            missing.iter().find(|row| {
+                !matched_missing_ids.contains(&row.id)
+                    && row.content_hash.as_deref() == Some(h.as_str())
+            })
         });
 
         if let Some(old) = rename_source {
@@ -508,6 +514,39 @@ mod tests {
         assert_eq!(tracks[0].id, original_id);
         assert_eq!(tracks[0].path, new_path.to_string_lossy());
         assert!(db.is_favorite(original_id).unwrap());
+    }
+
+    #[test]
+    fn scan_matches_at_most_one_new_file_per_missing_row_when_content_hashes_collide() {
+        // Regression test: the rename-detection match previously searched
+        // the full `missing` list without excluding rows already claimed
+        // earlier in the same scan. If two on-disk files share one content
+        // hash with a single now-missing row, both would match it — the
+        // second `rename_track_path` call would silently repoint the same
+        // row a second time, leaving the first file with no DB row at all.
+        let dir = TestDir::new("duplicate-rename-target");
+        let cache = dir.path.join("cache");
+        let original_path = dir.path.join("original.wav");
+        let content = build_wav(Some(("Track", "Artist", "Album", "Genre")), 0.2);
+        fs::write(&original_path, &content).unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        scan_root(&db, &cache, &dir.path).unwrap();
+        assert_eq!(db.list_tracks().unwrap().len(), 1);
+
+        // Delete the original and replace it with two byte-identical
+        // copies — both hash the same as the now-missing row.
+        fs::remove_file(&original_path).unwrap();
+        fs::write(dir.path.join("copy-b.wav"), &content).unwrap();
+        fs::write(dir.path.join("copy-c.wav"), &content).unwrap();
+
+        let summary = scan_root(&db, &cache, &dir.path).unwrap();
+
+        // Exactly one duplicate can be a genuine rename of the missing
+        // row; the other must be inserted as a new track, not dropped.
+        assert_eq!(summary.renamed, 1);
+        assert_eq!(summary.added, 1);
+        assert_eq!(db.list_tracks().unwrap().len(), 2);
     }
 
     #[test]

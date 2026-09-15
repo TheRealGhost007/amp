@@ -538,7 +538,7 @@ green quality gate means correct behavior. Found and fixed two real bugs.
    then unconditionally overwrote `currentTrack`/`isFavorite` — so a
    user double-clicking Next (or Next then Previous) fast enough to have
    two `playNow` calls in flight at once could end up with the store
-   showing the *first*-clicked track as playing even though the *second*
+   showing the _first_-clicked track as playing even though the _second_
    click's command actually reached the backend last and is what's
    really playing. Same shape of bug in the `TrackAdvanced` event
    handler and in `toggleFavorite` (rapid double-click on the heart could
@@ -547,19 +547,19 @@ green quality gate means correct behavior. Found and fixed two real bugs.
    `favoriteSeq` in `playbackStore.ts`): each mutation captures the
    current counter before its `await`, bumps it, and only applies its
    `set()` if the counter is still unchanged when it resumes — so only
-   the most-recently-*initiated* call's result can ever stick, regardless
+   the most-recently-_initiated_ call's result can ever stick, regardless
    of reply order. Verified with a real regression test
    (`playbackStore.test.ts`) using controllable deferred promises to
    force the out-of-order case; confirmed it fails without the fix (git
    stash showed `currentTrack` landing on the stale first-clicked track)
    and passes with it, same discipline as the Phase 4 Popover fix.
    **Known accepted limitation, not fixed here**: this guards
-   client-*initiated* races only. A separate, more theoretical race
+   client-_initiated_ races only. A separate, more theoretical race
    exists between the 200ms tick loop's event emission and a concurrent
    command's reply delivery — both share the same backend mutex so
    backend state itself stays consistent, but nothing currently
    guarantees an emitted `PlaybackFinished` for an old track can't be
-   *delivered* to the frontend after a newer `playNow`'s reply, which
+   _delivered_ to the frontend after a newer `playNow`'s reply, which
    would incorrectly clobber good state back to "nothing playing." Fixing
    that properly needs a backend-generated monotonic counter attached to
    every event/command reply so the frontend can detect true staleness
@@ -568,13 +568,144 @@ green quality gate means correct behavior. Found and fixed two real bugs.
    change, not something to bolt on speculatively here.
 2. **Process bug (not application code): a markdown code span broken
    across a line wrap in `PLAN.md`'s Phase 7 entry** (`` `layoutId=
-   "now-playing-artwork"` ``) made Prettier's output non-idempotent —
+"now-playing-artwork"` ``) made Prettier's output non-idempotent —
    `prettier --write` would "fix" the file and `prettier --check`
    would immediately flag it again. Fixed by rewording the sentence so
    no inline code span spans a line break. Worth remembering: a
    `format`/`--check` step that keeps failing right after `--write` was
    just run is a sign the input itself is malformed, not that the
    tool is broken.
+
+## Full-codebase bug-hunt pass (post-Phase-7, second pass)
+
+The user asked for a bug hunt across every file, not just Phase 7's. Given
+the size (~7,100 lines across ~85 files), the hunt was split into four
+parallel, read-only research passes (one per subsystem: `player-core`,
+`audio-engine`, the `src-tauri` IPC layer + `linux-integration`, and the
+remaining frontend components/views), each reporting candidate bugs with a
+concrete failure scenario rather than style nits. Findings were then
+verified by direct code reading and fixed here, one at a time, each with a
+regression test confirmed to fail without its fix and pass with it
+(reverted via `git stash`/manual edit, re-tested, restored — the same
+discipline as the Phase 4 Popover fix).
+
+**`src-tauri` + `linux-integration`**: no real bugs found. Confirmed
+thin-IPC-layer discipline holds (every command is a lock, a delegate call,
+a return), no lock-order inversion is possible (never more than one mutex
+held per command), all camelCase/snake_case IPC parameter names match
+their frontend call sites, and `linux-integration` remains the empty
+Phase-11 scaffold it's supposed to be at this point.
+
+**`audio-engine`** — two real bugs, both in `tick()`'s error handling:
+1. A failed `backend.load()` during EOS-recovery or crossfade-start
+   propagated via `?`, aborting the whole tick and discarding every event
+   accumulated that tick. Worse: in the EOS-recovery path `self.next` had
+   already been cleared by `.take()` before the fallible call, so nothing
+   would ever retry — the player froze forever on the stale `current`
+   track with a dead pipeline and zero visible error. In the
+   crossfade-start path `self.next` was *not* yet cleared, so the
+   identical failing load would retry every 200ms tick for the rest of
+   the crossfade window. Fixed by extracting a `load_and_play` helper and
+   handling its `Result` explicitly at both call sites: EOS-recovery
+   failure now reports `PlayerEvent::Error` and finishes gracefully
+   (matching the existing no-next branch); crossfade-start failure
+   reports the error, clears `next` once, and — since the *current* track
+   is still playing fine, only the preload failed — leaves it alone
+   rather than stopping good audio, letting its own natural EOS report
+   `PlaybackFinished` normally later. Also: `poll_events` was only ever
+   called on `self.active`, so a real decode error on the slot being
+   crossfaded *into* would sit unread on its bus and never surface; now
+   polled (for `Error` only) during an active crossfade too.
+2. `set_playback_speed` only forwarded to `self.active`, unlike
+   `set_muted`/`set_eq_band`, which explicitly apply to both slots "so a
+   crossfade never audibly jumps." A speed change mid-crossfade left the
+   outgoing and incoming tracks at different speeds for the rest of the
+   transition. Fixed to match the sibling setters. Four new regression
+   tests in `player.rs` plus test-only `SimulatedBackend` hooks
+   (`fail_load_for_test`, `speed_for_test`, `push_error_for_test`) needed
+   to reproduce failure/inspection scenarios the existing simulated
+   backend couldn't otherwise trigger.
+
+**`player-core`** — three real bugs:
+1. **Data loss**: rename-detection matched a new file against the full
+   `missing` list without excluding rows an earlier file in the same scan
+   had already claimed. Two on-disk files sharing one content hash (e.g.
+   a deleted track duplicated to two new paths) would both match the same
+   now-missing row — the second `rename_track_path` call silently
+   repointed the same row a second time, leaving the first file with no
+   DB row at all and double-counting `summary.renamed`. Fixed by
+   excluding `matched_missing_ids` from the search predicate, so a second
+   duplicate correctly falls through to being inserted as a new track.
+2. `Database::last_scanned_at` returned `Err(QueryReturnedNoRows)` instead
+   of `Ok(None)` for a root not present in `scan_state`, unlike every
+   sibling single-row lookup in the crate (all of which use
+   `.optional()`). Not reachable from any current caller, but exactly the
+   "looks fine until something finally calls it" shape this project has
+   hit before (the original `is_playing()` bug). Fixed with `.optional()`
+   + `Option::flatten` (the column is itself nullable, so there are two
+   layers of optionality to collapse).
+3. **Design gap in unshipped code**: `reorder_playlist` and (the
+   since-renamed) `remove_track_from_playlist` keyed off `track_id`, but
+   nothing in the schema prevents the same track appearing in a playlist
+   twice — `playlist_tracks` has its own `id` primary key precisely for
+   this reason, unused until now. A track added twice would have *both*
+   occurrences moved/removed by any single reorder/remove call, making
+   independent occurrences impossible to manage. Not yet reachable (no
+   playlist UI exists before Phase 8), but fixed now rather than let
+   Phase 8 build a drag-reorder UI on top of a known-broken foundation:
+   `add_track_to_playlist` now returns the new row's own id,
+   `reorder_playlist`/`remove_playlist_track` key off that id, and a new
+   `playlist_track_rows` method exposes `(row_id, track_id)` pairs for
+   callers that need to address a specific occurrence.
+
+**Frontend** — three real bugs plus one off-by-one in code already being
+touched:
+1. **`Menu` never received keyboard focus on open**, so arrow-key
+   navigation was completely dead until the user manually Tabbed or
+   clicked into an item — a real, reachable break of the app's stated
+   keyboard-first pillar in already-shipped code (e.g. Settings' theme
+   picker). Fixed with a `useEffect` on `open` that focuses the first
+   enabled item and restores focus to whatever was focused before on
+   close, mirroring `Dialog.tsx`'s existing pattern one file over.
+2. Same file, one-line off-by-one: `handleKeyDown`'s wrap-around formula
+   handled "nothing focused yet" (`currentIndex === -1`) correctly for
+   ArrowDown (lands on index 0) but not ArrowUp (landed on the
+   second-to-last item instead of the last). Only reachable before fix
+   #1 landed in practice, but fixed in the same pass since it was in code
+   already being changed.
+3. `Library.tsx`'s debounced search had no stale-response guard — the
+   same race class just fixed in `playbackStore`. Typing "cat", pausing
+   long enough to fire a search, then typing "s" before it resolved could
+   show "cat"'s results if that reply arrived after "cats"'s, with
+   nothing to correct it afterward. Fixed with the same `cancelled` flag
+   pattern `LibraryContext.tsx`'s mount effect already used one file over.
+4. `Queue.tsx` rendered the literal string `Track #${currentTrack.id}`
+   instead of a real title — `currentTrack` from the playback store is
+   just `{ id, uri }` with no display metadata, so anyone opening Queue
+   while something played saw a raw internal id. Fixed by switching to
+   `useNowPlaying()` (built in Phase 7, already used by
+   `MiniPlayer`/`FullPlayer`), which resolves the same store value into a
+   full `TrackListItem`.
+
+**Noted but deliberately not fixed**: `Popover.tsx` only computes its
+position once on open (no reposition on scroll/resize) and only clamps
+the left edge, never the bottom — harmless today because its only live
+consumer (Settings' theme `Dropdown`) sits near the top of a
+non-scrolling section, but Phase 9's context menus will anchor `Popover`
+all over the screen. Worth a flip/clamp pass during or right before that
+phase rather than speculatively now.
+
+**Every fix above shipped with a regression test verified against the bug
+it fixes**, not just written to pass against the fixed code — each was
+confirmed to fail on the pre-fix code (via `git stash` or a manual
+temporary revert) before the fix was restored. New tests: 4 in
+`audio-engine`'s `player.rs`, 1 in `player-core`'s `scan/mod.rs`, 1 in
+`player-core`'s `db/scan_state.rs`, 1 in `player-core`'s
+`db/playlists.rs`, 3 in `Menu.test.tsx`, 1 new `Library.test.tsx` (which
+needed a hand-rolled `@tanstack/react-virtual` mock, since jsdom reports a
+zero-size scroll container and the real virtualizer renders nothing at
+all under that condition — worth remembering for any future test that
+needs to assert on virtualized row *content*, not just row count).
 
 ## Phase 0 status
 

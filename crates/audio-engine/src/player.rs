@@ -86,6 +86,17 @@ impl<B: Backend> Player<B> {
         Ok(())
     }
 
+    /// Loads and starts `uri` on `slot`, applying the currently-configured
+    /// volume/mute/speed/EQ. Used by both the gapless/crossfade EOS
+    /// recovery path and the crossfade-start path so a load failure (a
+    /// corrupt or deleted file queued as `next`) is handled identically
+    /// wherever it can occur, instead of aborting `tick()` via `?`.
+    fn load_and_play(&mut self, slot: Slot, uri: &str, volume: f64) -> Result<()> {
+        self.backend.load(slot, uri)?;
+        self.apply_slot_settings(slot, volume)?;
+        self.backend.play(slot)
+    }
+
     /// Interrupts whatever is playing and starts `track` immediately on
     /// `Slot::A`. Clears any in-progress crossfade; the caller should call
     /// [`Player::set_next`] again afterward if there is a track that
@@ -175,9 +186,14 @@ impl<B: Backend> Player<B> {
         Ok(())
     }
 
+    /// Applied to both slots, like `set_muted`/`set_eq_band`, so a track
+    /// being crossfaded into doesn't keep playing at a stale speed for
+    /// the rest of the transition after the rate changes mid-fade.
     pub fn set_playback_speed(&mut self, rate: f64) -> Result<()> {
         self.speed = rate;
-        self.backend.set_playback_speed(self.active, rate)
+        self.backend.set_playback_speed(Slot::A, rate)?;
+        self.backend.set_playback_speed(Slot::B, rate)?;
+        Ok(())
     }
 
     /// `None` (the default) means gapless; `Some(ms)` enables crossfade
@@ -231,11 +247,28 @@ impl<B: Backend> Player<B> {
                         // was caught). Recover by advancing immediately on
                         // the same slot rather than reporting a false
                         // "queue exhausted."
-                        self.backend.load(self.active, &next.uri)?;
-                        self.apply_slot_settings(self.active, self.volume)?;
-                        self.backend.play(self.active)?;
-                        self.current = Some(next);
-                        out.push(PlayerEvent::TrackAdvanced);
+                        //
+                        // A failure here (corrupt/deleted file queued as
+                        // `next`) must not abort the whole tick via `?` —
+                        // the old track has already genuinely ended, so
+                        // there's nothing left to keep playing; report the
+                        // error and finish gracefully instead of silently
+                        // freezing on a stale `current` forever (`self.next`
+                        // is already cleared by `.take()` above, so nothing
+                        // would ever retry this).
+                        match self.load_and_play(self.active, &next.uri, self.volume) {
+                            Ok(()) => {
+                                self.current = Some(next);
+                                out.push(PlayerEvent::TrackAdvanced);
+                            }
+                            Err(e) => {
+                                out.push(PlayerEvent::Error(e.to_string()));
+                                self.current = None;
+                                self.is_playing = false;
+                                out.push(PlayerEvent::StateChanged(PlaybackState::Stopped));
+                                out.push(PlayerEvent::PlaybackFinished);
+                            }
+                        }
                     } else {
                         self.current = None;
                         self.is_playing = false;
@@ -247,6 +280,17 @@ impl<B: Backend> Player<B> {
             }
         }
 
+        // Errors from the inactive slot's pipeline (the track being
+        // crossfaded into) would otherwise go completely unobserved —
+        // `poll_events` above only drains `self.active`'s bus.
+        if self.crossfade.is_some() {
+            for event in self.backend.poll_events(self.active.other()) {
+                if let BackendEvent::Error(message) = event {
+                    out.push(PlayerEvent::Error(message));
+                }
+            }
+        }
+
         if let Some(total_ms) = self.crossfade_ms {
             if self.crossfade.is_none() {
                 if let (Some(next), Some(duration), Some(position)) =
@@ -254,18 +298,34 @@ impl<B: Backend> Player<B> {
                 {
                     if duration.saturating_sub(position) <= total_ms {
                         let inactive = self.active.other();
-                        self.backend.load(inactive, &next.uri)?;
-                        self.apply_slot_settings(inactive, 0.0)?;
-                        self.backend.play(inactive)?;
-                        // Committed: this crossfade owns `next` from here.
-                        // `set_next` calls from this point on target
-                        // whatever comes *after* this transition finishes.
-                        self.next = None;
-                        self.crossfade = Some(CrossfadeProgress {
-                            total_ms,
-                            elapsed_ms: 0,
-                            target: next,
-                        });
+                        match self.load_and_play(inactive, &next.uri, 0.0) {
+                            Ok(()) => {
+                                // Committed: this crossfade owns `next` from
+                                // here. `set_next` calls from this point on
+                                // target whatever comes *after* this
+                                // transition finishes.
+                                self.next = None;
+                                self.crossfade = Some(CrossfadeProgress {
+                                    total_ms,
+                                    elapsed_ms: 0,
+                                    target: next,
+                                });
+                            }
+                            Err(e) => {
+                                // The currently-active slot is still playing
+                                // the current track normally — only the
+                                // *next* track failed to preload, so don't
+                                // stop good audio; just clear `next` (so
+                                // this failing load isn't retried every
+                                // tick for the rest of the window) and
+                                // report the error. The active slot's own
+                                // natural EOS will then correctly report
+                                // `PlaybackFinished` via the no-next branch
+                                // above once it arrives.
+                                out.push(PlayerEvent::Error(e.to_string()));
+                                self.next = None;
+                            }
+                        }
                     }
                 }
             }
@@ -467,6 +527,107 @@ mod tests {
         // Re-applying settings on play_now should not have clobbered the
         // stored EQ value used for the next slot to start.
         assert_eq!(player.eq_bands[3], 4.5);
+    }
+
+    #[test]
+    fn set_playback_speed_applies_to_both_slots_so_crossfade_never_jumps() {
+        // Regression test: set_playback_speed previously only forwarded to
+        // `self.active`, unlike set_muted/set_eq_band — a speed change
+        // mid-crossfade would leave the two slots playing at different
+        // speeds for the rest of the transition.
+        let mut player = Player::new(SimulatedBackend::new());
+        player.play_now(track(1, "a")).unwrap();
+        player.set_playback_speed(1.5).unwrap();
+        assert_eq!(player.backend.speed_for_test(Slot::A), 1.5);
+        assert_eq!(player.backend.speed_for_test(Slot::B), 1.5);
+    }
+
+    #[test]
+    fn eos_recovery_load_failure_reports_error_and_finishes_gracefully_instead_of_freezing() {
+        // Regression test: a corrupt/deleted file queued as `next` used to
+        // abort `tick()` via `?`, and since `next.take()` had already run,
+        // nothing would ever retry — playback froze forever on the old
+        // (already-finished) track with no visible error.
+        let mut player = Player::new(SimulatedBackend::new());
+        player.set_crossfade_duration(Some(200)).unwrap();
+        player.play_now(track(1, "a")).unwrap();
+        player.backend.set_duration_for_test(Slot::A, 1000);
+        player.backend.fail_load_for_test("b");
+        player.set_next(Some(track(2, "b"))).unwrap();
+
+        // Jumps straight past the crossfade window to natural EOS, same
+        // "missed tick" shape as `eos_with_a_queued_next_recovers_instead_of_reporting_finished`.
+        player.backend.advance(Slot::A, 1500);
+        let events = player.tick(1500).unwrap();
+
+        assert!(
+            events.iter().any(|e| matches!(e, PlayerEvent::Error(_))),
+            "a failed recovery load must be reported, not silently swallowed"
+        );
+        assert!(events.contains(&PlayerEvent::PlaybackFinished));
+        assert_eq!(player.current_track(), None);
+        assert!(!player.is_playing());
+    }
+
+    #[test]
+    fn crossfade_start_load_failure_reports_error_and_leaves_current_track_playing() {
+        // Regression test: a failed preload of `next` at the crossfade
+        // boundary used to abort `tick()` via `?` and leave `self.next`
+        // still set, retrying the identical failing load every tick for
+        // the rest of the window. The still-good current track should
+        // just keep playing normally instead.
+        let mut player = Player::new(SimulatedBackend::new());
+        player.set_crossfade_duration(Some(2000)).unwrap();
+        player.play_now(track(1, "a")).unwrap();
+        player.backend.set_duration_for_test(Slot::A, 10_000);
+        player.backend.fail_load_for_test("b");
+        player.set_next(Some(track(2, "b"))).unwrap();
+
+        player.backend.advance(Slot::A, 7000);
+        player.tick(7000).unwrap();
+
+        player.backend.advance(Slot::A, 1000);
+        let events = player.tick(1000).unwrap();
+
+        assert!(
+            events.iter().any(|e| matches!(e, PlayerEvent::Error(_))),
+            "a failed crossfade preload must be reported, not silently swallowed"
+        );
+        assert_eq!(player.current_track(), Some(&track(1, "a")));
+        assert_eq!(player.active, Slot::A);
+        assert!(player.is_playing());
+
+        // Must not retry the same failing load every subsequent tick.
+        player.backend.advance(Slot::A, 100);
+        let events = player.tick(100).unwrap();
+        assert!(!events.iter().any(|e| matches!(e, PlayerEvent::Error(_))));
+    }
+
+    #[test]
+    fn errors_on_the_inactive_slot_during_crossfade_are_surfaced() {
+        // Regression test: poll_events was only ever called on
+        // `self.active`, so a real decode error on the slot being
+        // crossfaded into would sit unread on its bus and go unreported.
+        let mut player = Player::new(SimulatedBackend::new());
+        player.set_crossfade_duration(Some(2000)).unwrap();
+        player.play_now(track(1, "a")).unwrap();
+        player.backend.set_duration_for_test(Slot::A, 10_000);
+        player.set_next(Some(track(2, "b"))).unwrap();
+
+        player.backend.advance(Slot::A, 7000);
+        player.tick(7000).unwrap();
+        player.backend.advance(Slot::A, 1000);
+        player.tick(1000).unwrap();
+        assert!(
+            player.backend.position_ms(Slot::B).is_some(),
+            "crossfade should have started"
+        );
+
+        player.backend.push_error_for_test(Slot::B, "decode error");
+        let events = player.tick(100).unwrap();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, PlayerEvent::Error(msg) if msg == "decode error")));
     }
 
     #[test]
