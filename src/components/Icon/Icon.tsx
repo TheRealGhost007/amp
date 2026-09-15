@@ -21,7 +21,16 @@ export type IconName =
   | "chevron-down"
   | "dots"
   | "queue"
-  | "folder";
+  | "folder"
+  | "home"
+  | "library"
+  | "disc"
+  | "user"
+  | "list"
+  | "clock"
+  | "download"
+  | "settings"
+  | "chevron-left";
 
 const PATHS: Record<IconName, string> = {
   play: "M7 5.5v13l11-6.5-11-6.5Z",
@@ -45,6 +54,17 @@ const PATHS: Record<IconName, string> = {
   queue: "M4 6.5h12M4 12h12M4 17.5h8M18 15v6M15 18h6",
   folder:
     "M4 7a1.5 1.5 0 0 1 1.5-1.5h4l1.7 2H18.5A1.5 1.5 0 0 1 20 9v8a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17V7Z",
+  home: "M4 11.5 12 4l8 7.5M6 10v9h4v-5h4v5h4v-9",
+  library: "M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z",
+  disc: "M4.5 12a7.5 7.5 0 1 0 15 0 7.5 7.5 0 0 0-15 0ZM10 12a2 2 0 1 0 4 0 2 2 0 0 0-4 0Z",
+  user: "M9 7a3 3 0 1 0 6 0 3 3 0 0 0-6 0ZM5 20c0-4 3.5-6.5 7-6.5s7 2.5 7 6.5",
+  list: "M4 6.5h16M4 12h16M4 17.5h10",
+  clock: "M4.5 12a7.5 7.5 0 1 0 15 0 7.5 7.5 0 0 0-15 0ZM12 7.5v4.5l3 2",
+  download:
+    "M12 4v11m0 0-4-4m4 4 4-4M5 17.5v2A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-2",
+  settings:
+    "M4 7h3.25m3.5 0H20M4 12h9.25m3.5 0H20M4 17h5.25m3.5 0H20M7.25 7a1.75 1.75 0 1 0 3.5 0 1.75 1.75 0 0 0-3.5 0ZM13.25 12a1.75 1.75 0 1 0 3.5 0 1.75 1.75 0 0 0-3.5 0ZM9.25 17a1.75 1.75 0 1 0 3.5 0 1.75 1.75 0 0 0-3.5 0Z",
+  "chevron-left": "M15 6 9 12l6 6",
 };
 
 interface IconProps {

@@ -1,11 +1,14 @@
 //! Types shared between `Player` and every `Backend` implementation.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Deliberately independent of `player-core`'s `Track` model — this
 /// crate only needs a URI and an id to report back in events, keeping
-/// the audio and library concerns decoupled.
-#[derive(Debug, Clone, PartialEq)]
+/// the audio and library concerns decoupled. `Deserialize` is needed
+/// alongside `Serialize` here (unlike most other types in this crate)
+/// because `src-tauri` commands accept a `TrackRef` as an argument from
+/// the frontend (e.g. "play this track"), not just report one back.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackRef {
     pub id: i64,
     pub uri: String,

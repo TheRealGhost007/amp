@@ -303,8 +303,8 @@ suite until new tests were added alongside each fix:
    transition.** `set_next` unconditionally overwrote `Player::next`;
    the crossfade-completion code read `next` at completion time, so a
    reorder during the crossfade window made the transition land on the
-   *new* next track's id while the audio actually crossfading in was
-   still the *old* one — track metadata and audio would disagree.
+   _new_ next track's id while the audio actually crossfading in was
+   still the _old_ one — track metadata and audio would disagree.
    Fixed by capturing the crossfade's target track when the transition
    commits (not read again at completion), so `next` becomes freely
    reassignable mid-crossfade for whatever should follow it.
@@ -317,7 +317,7 @@ suite until new tests were added alongside each fix:
 5. **The Popover outside-click handler didn't recognize its own
    content.** `Popover` portals its content to `document.body`, so it's
    never a DOM descendant of `anchorRef` — the pointerdown-outside check
-   only tested against the anchor, meaning a pointerdown on *any* menu
+   only tested against the anchor, meaning a pointerdown on _any_ menu
    item (inside the portaled content) counted as "outside" and closed
    the menu before the item's own `onClick` could fire. This broke every
    menu action silently: it looked correct in a static screenshot
@@ -336,6 +336,62 @@ suite until new tests were added alongside each fix:
 that doesn't mirror real usage, will not surface a bug no matter how
 thorough it looks — verify a fix's test actually fails without the fix
 before trusting it, not just that it passes with the fix.
+
+## Phase 5: application shell & state wiring
+
+**Backend**: `src-tauri/src/state.rs` holds `Mutex<Option<Player<
+GstreamerBackend>>>` and `Mutex<Database>` behind `tauri::State`. The
+player is `Option` because `GstreamerBackend::new()` can fail (no
+GStreamer/PipeWire) — the app still starts in that case, logs the
+failure, and every player command returns a clear `AUDIO_UNAVAILABLE`
+error instead of the whole process crashing (spec §27). A new
+`audio_engine::Error::Unavailable` variant carries this distinctly from
+`Pipeline` (a runtime failure of an otherwise-working backend). 16
+commands in `src-tauri/src/commands/` are thin pass-throughs to `Player`
+methods — no playback logic lives in the Tauri layer, matching the
+plan's own layering rule. A `tauri::async_runtime::spawn`ed loop ticks
+the player every 200ms and emits `player-event` (state transitions) and
+`player-position` (continuous ticking for a future progress bar) as
+separate event channels, since `PlayerEvent` doesn't carry position.
+
+**Settings persistence**: rather than one Tauri command per setting,
+`get_setting`/`set_setting` bridge opaque `serde_json::Value`s to
+`player_core::Database`'s existing settings table (built in Phase 2) —
+Tauri commands can't be generic, so the type-specific shape of a given
+setting is the frontend's concern.
+
+**Frontend**: a Zustand store (`src/store/playbackStore.ts`) is the
+single source of truth for playback UI state, hydrated once via
+`player_status` on mount and kept live via the two event channels above
+— exactly the high-frequency-update case Zustand was chosen for back in
+Phase 1's dependency list. `src/lib/ipc.ts` centralizes every
+`invoke`/`listen` call so a renamed or reshaped command only needs
+updating once.
+
+Sidebar + 10 real navigable views (Home, Music Library, Albums, Artists,
+Playlists, Favorites, Recently Played, Queue, Downloads, Settings)
+replace the Phase 1 design-system gallery, which is retired now that its
+purpose is served (documented via screenshots in this file and superseded
+by `Menu.test.tsx`'s more properly-scoped interaction coverage). No
+router: view switching is a plain `useState<ViewId>` in `Shell.tsx`,
+matching `mc-launcher`'s precedent — a fixed sidebar with no deep-linking
+need doesn't justify `react-router-dom`. Settings' Appearance section is
+real (the theme picker from Phase 1, now persisted).
+
+**Real bug caught only by on-device screenshot verification**: the
+sidebar always rendered icon-only/collapsed regardless of React state.
+A debug log confirmed `collapsed` was correctly `false` — this was a
+pure CSS bug, not a state bug. The shell used `grid-template-columns:
+auto 1fr` expecting the `auto` track to continuously track the
+sidebar's own transitioning `width`; this WebKitGTK version doesn't
+size that reliably; the track collapsed to icon-only width regardless
+of the sidebar's actual computed width. Fixed by switching `.op-shell`
+to Flexbox (`flex-shrink: 0` on the sidebar makes its width
+authoritative, no track-sizing ambiguity). Verified both states with
+screenshots, including forcing the collapsed default temporarily to
+confirm that CSS path too. Worth remembering: automated jsdom tests
+cannot catch this class of bug at all — jsdom doesn't compute real
+layout — so this was only reachable through actual on-device rendering.
 
 ## Phase 0 status
 

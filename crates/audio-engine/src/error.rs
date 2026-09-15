@@ -16,6 +16,13 @@ pub enum Error {
     #[error("unsupported media: {0}")]
     Unsupported(String),
 
+    /// The audio backend never initialized (e.g. GStreamer/PipeWire
+    /// unavailable at startup) — distinct from `Pipeline`, which is a
+    /// runtime failure of an otherwise-working backend. `src-tauri`
+    /// surfaces this instead of crashing the whole app (spec §27).
+    #[error("audio backend unavailable: {0}")]
+    Unavailable(String),
+
     #[error("{0}")]
     Internal(String),
 }
@@ -33,6 +40,7 @@ impl Error {
             Error::Pipeline(_) => "PIPELINE_ERROR",
             Error::DeviceNotFound(_) => "DEVICE_NOT_FOUND",
             Error::Unsupported(_) => "UNSUPPORTED_MEDIA",
+            Error::Unavailable(_) => "AUDIO_UNAVAILABLE",
             Error::Internal(_) => "INTERNAL_ERROR",
         }
     }

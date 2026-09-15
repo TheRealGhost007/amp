@@ -28,3 +28,4 @@ tracing-subscriber.workspace = true
 player-core.workspace = true
 audio-engine.workspace = true
 linux-integration.workspace = true
+tokio.workspace = true

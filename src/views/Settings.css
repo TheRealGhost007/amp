@@ -1,0 +1,25 @@
+.op-settings-section {
+  max-width: 480px;
+  padding: var(--space-lg) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.op-settings-section:last-child {
+  border-bottom: none;
+}
+
+.op-settings-section__title {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-subtitle);
+  font-weight: var(--font-weight-semibold);
+}
+
+.op-settings-section--upcoming .op-settings-section__title {
+  color: var(--fg-muted);
+}
+
+.op-settings-section__note {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: var(--text-body-sm);
+}

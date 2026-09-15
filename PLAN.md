@@ -40,8 +40,20 @@ plan file's existence means work happened.
       see ARCHITECTURE.md. Manually verified on this machine: play/
       pause/resume/seek/EQ/crossfade (audibly, dual-slot confirmed)/
       device-switch all work against real hardware.
-- [ ] **Phase 5 — Application Shell & State Wiring**: sidebar, routing,
-      Zustand playback store, Context providers, all views navigable.
+- [x] **Phase 5 — Application Shell & State Wiring**: a real
+      `Player<GstreamerBackend>` wired into `src-tauri` behind a mutex,
+      16 IPC commands, a 200ms tick loop emitting `player-event`/
+      `player-position`. Zustand playback store consuming those events.
+      Sidebar (collapsible, tooltips when collapsed, no layout jump) +
+      10 real navigable views with proper empty states, replacing the
+      Phase 1 gallery. Settings' Appearance section is real (theme
+      picker persisted via player-core's settings table through a new
+      generic get/set-setting IPC bridge). Caught a real WebKitGTK CSS
+      Grid bug on-device (an `auto` track wouldn't track a transitioning
+      child's width — sidebar always rendered collapsed regardless of
+      state); fixed by switching the shell layout to Flexbox.
+      State-based view switching, no router — simple and sufficient for
+      a fixed sidebar with no deep-linking need.
 - [ ] **Phase 6 — Library Browsing at Scale**: virtualized lists, real
       data, search against FTS5.
 - [ ] **Phase 7 — Now Playing / Mini-Player / Full Player**.

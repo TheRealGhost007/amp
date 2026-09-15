@@ -1,4 +1,9 @@
 .op-icon {
   display: inline-block;
   flex-shrink: 0;
+  transition: transform var(--motion-base) var(--ease-out);
+}
+
+.op-icon--flipped {
+  transform: rotate(180deg);
 }

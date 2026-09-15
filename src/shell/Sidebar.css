@@ -1,0 +1,105 @@
+/**
+ * Collapse mechanic: the sidebar's own `width` transitions; `flex-shrink:
+ * 0` (it's a flex child of .op-shell) keeps that width authoritative
+ * instead of being squeezed to content size — no layout jump at any
+ * viewport width (spec §3/§33).
+ */
+
+.op-sidebar {
+  --sidebar-width: 224px;
+  --sidebar-width-collapsed: 64px;
+
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-dim);
+  border-right: 1px solid var(--border);
+  transition: width var(--motion-base) var(--ease-out);
+}
+
+.op-sidebar--collapsed {
+  width: var(--sidebar-width-collapsed);
+}
+
+.op-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 var(--space-md);
+  flex-shrink: 0;
+}
+
+.op-sidebar__brand {
+  font-size: var(--text-title);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.op-sidebar__collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-control);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.op-sidebar__collapse-toggle:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.op-sidebar__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-xs);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  overflow-y: auto;
+}
+
+.op-sidebar__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  height: 38px;
+  padding: 0 var(--space-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-control);
+  color: var(--fg-muted);
+  font-size: var(--text-body-sm);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.op-sidebar__item:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.op-sidebar__item--active {
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.op-sidebar--collapsed .op-sidebar__item {
+  justify-content: center;
+  padding: 0;
+}

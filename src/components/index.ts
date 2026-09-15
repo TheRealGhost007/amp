@@ -14,3 +14,4 @@ export { Dialog } from "./Dialog/Dialog";
 export { ToastProvider, useToast } from "./Toast/Toast";
 export { Icon } from "./Icon/Icon";
 export type { IconName } from "./Icon/Icon";
+export { EmptyState } from "./EmptyState/EmptyState";

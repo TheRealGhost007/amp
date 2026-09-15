@@ -1,0 +1,20 @@
+.op-view {
+  padding: var(--space-xl);
+  max-width: 1400px;
+}
+
+.op-view__header {
+  margin-bottom: var(--space-lg);
+}
+
+.op-view__title {
+  margin: 0;
+  font-size: var(--text-heading);
+  font-weight: var(--font-weight-semibold);
+}
+
+.op-view__subtitle {
+  margin: var(--space-xxs) 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-body-sm);
+}
