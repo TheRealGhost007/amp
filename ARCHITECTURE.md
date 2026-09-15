@@ -522,6 +522,60 @@ presentational wiring over already-tested store/hook logic and existing
 primitives, so the hook is where the real logic (and the real test value)
 lives.
 
+## Post-Phase-7 bug-hunt pass
+
+A dedicated review pass over Phase 7 and its integration points, following
+the same discipline as the post-Phase-4 bug-hunt: read the actual code
+looking for real, demonstrable failure modes rather than trusting that a
+green quality gate means correct behavior. Found and fixed two real bugs.
+
+1. **Real bug: `playbackStore` had no defense against out-of-order
+   command replies.** Tauri dispatches non-`async` commands (all of
+   `player_status`/`player_play_now`/etc.) across a thread pool rather
+   than a single ordered queue, so two overlapping invocations of the
+   same command are not guaranteed to reply in the order they were
+   called. `playbackStore.playNow` awaited `player.playNow(track)` and
+   then unconditionally overwrote `currentTrack`/`isFavorite` — so a
+   user double-clicking Next (or Next then Previous) fast enough to have
+   two `playNow` calls in flight at once could end up with the store
+   showing the *first*-clicked track as playing even though the *second*
+   click's command actually reached the backend last and is what's
+   really playing. Same shape of bug in the `TrackAdvanced` event
+   handler and in `toggleFavorite` (rapid double-click on the heart could
+   leave the UI showing the opposite of the DB's actual final state).
+   Fixed with a monotonic sequence-number guard (`trackMutationSeq`,
+   `favoriteSeq` in `playbackStore.ts`): each mutation captures the
+   current counter before its `await`, bumps it, and only applies its
+   `set()` if the counter is still unchanged when it resumes — so only
+   the most-recently-*initiated* call's result can ever stick, regardless
+   of reply order. Verified with a real regression test
+   (`playbackStore.test.ts`) using controllable deferred promises to
+   force the out-of-order case; confirmed it fails without the fix (git
+   stash showed `currentTrack` landing on the stale first-clicked track)
+   and passes with it, same discipline as the Phase 4 Popover fix.
+   **Known accepted limitation, not fixed here**: this guards
+   client-*initiated* races only. A separate, more theoretical race
+   exists between the 200ms tick loop's event emission and a concurrent
+   command's reply delivery — both share the same backend mutex so
+   backend state itself stays consistent, but nothing currently
+   guarantees an emitted `PlaybackFinished` for an old track can't be
+   *delivered* to the frontend after a newer `playNow`'s reply, which
+   would incorrectly clobber good state back to "nothing playing." Fixing
+   that properly needs a backend-generated monotonic counter attached to
+   every event/command reply so the frontend can detect true staleness
+   rather than relying on client-side call order; deferred as a
+   Phase 13/14 hardening item since it requires a small backend contract
+   change, not something to bolt on speculatively here.
+2. **Process bug (not application code): a markdown code span broken
+   across a line wrap in `PLAN.md`'s Phase 7 entry** (`` `layoutId=
+   "now-playing-artwork"` ``) made Prettier's output non-idempotent —
+   `prettier --write` would "fix" the file and `prettier --check`
+   would immediately flag it again. Fixed by rewording the sentence so
+   no inline code span spans a line break. Worth remembering: a
+   `format`/`--check` step that keeps failing right after `--write` was
+   just run is a sign the input itself is malformed, not that the
+   tool is broken.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

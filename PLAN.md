@@ -70,10 +70,9 @@ plan file's existence means work happened.
       component tree (`MiniPlayer` + `FullPlayer`, connected by
       `PlayerDock`) rather than four separate implementations, since the
       spec's compact/bottom states overlap heavily with mini/full.
-      `framer-motion` shared-element transition (`layoutId=
-      "now-playing-artwork"`) between them; `MotionConfig
-      reducedMotion="user"` for global prefers-reduced-motion. Real
-      favorites wiring (3 new IPC commands over `player-core`'s
+      `framer-motion` shared-element transition (shared `layoutId`)
+      between them; `MotionConfig` with `reducedMotion="user"` for
+      global prefers-reduced-motion. Real favorites wiring (3 new IPC commands over `player-core`'s
       Phase-2 favorites table, previously unused by any UI). New
       `useNowPlaying.test.tsx` covering the hook's index/boundary logic.
       Deliberate scope decision: Previous/Next fall back to adjacent
