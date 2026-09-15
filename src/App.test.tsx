@@ -14,6 +14,14 @@ vi.mock("@tauri-apps/api/core", () => ({
       });
     }
     if (command === "get_setting") return Promise.resolve(null);
+    if (
+      command === "library_list_tracks" ||
+      command === "library_list_albums" ||
+      command === "library_list_artists" ||
+      command === "library_search"
+    ) {
+      return Promise.resolve([]);
+    }
     return Promise.resolve(undefined);
   }),
 }));

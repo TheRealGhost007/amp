@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { ToastProvider } from "./components";
+import { LibraryProvider } from "./context/LibraryContext";
 import { Shell } from "./shell/Shell";
 import { usePlaybackStore } from "./store/playbackStore";
 
@@ -17,7 +18,9 @@ function App() {
 
   return (
     <ToastProvider>
-      <Shell />
+      <LibraryProvider>
+        <Shell />
+      </LibraryProvider>
     </ToastProvider>
   );
 }

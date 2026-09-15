@@ -71,6 +71,43 @@ pub struct ScanDiffRow {
     pub content_hash: Option<String>,
 }
 
+/// A track joined with its artist/album/genre names for display —
+/// separate from [`Track`] (id-only foreign keys) because every browse
+/// view needs names, not ids, and joining once here beats an N+1 lookup
+/// per row on the frontend.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TrackListItem {
+    pub id: i64,
+    pub path: String,
+    pub title: String,
+    pub artist_name: Option<String>,
+    pub album_title: Option<String>,
+    pub genre_name: Option<String>,
+    pub track_number: Option<i64>,
+    pub disc_number: Option<i64>,
+    pub duration_ms: i64,
+    pub year: Option<i64>,
+    pub has_embedded_art: bool,
+    pub added_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AlbumSummary {
+    pub id: i64,
+    pub title: String,
+    pub artist_name: Option<String>,
+    pub year: Option<i64>,
+    pub track_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ArtistSummary {
+    pub id: i64,
+    pub name: String,
+    pub album_count: i64,
+    pub track_count: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Playlist {
     pub id: i64,

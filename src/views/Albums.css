@@ -1,0 +1,27 @@
+.op-album-grid__row {
+  display: flex;
+  gap: var(--space-lg);
+}
+
+.op-album-tile {
+  width: 168px;
+  flex-shrink: 0;
+}
+
+.op-album-tile__title {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--text-body-sm);
+  font-weight: var(--font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.op-album-tile__subtitle {
+  margin: var(--space-xxs) 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

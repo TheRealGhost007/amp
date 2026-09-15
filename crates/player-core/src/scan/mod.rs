@@ -16,13 +16,14 @@ mod walk;
 use crate::db::models::NewTrack;
 use crate::error::Result;
 use crate::Database;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::Hasher;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 pub struct ScanSummary {
     pub added: usize,
     pub updated: usize,
@@ -32,7 +33,7 @@ pub struct ScanSummary {
     pub errors: Vec<ScanFileError>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ScanFileError {
     pub path: String,
     pub message: String,
@@ -42,6 +43,15 @@ pub struct ScanFileError {
 /// database. One corrupt/unreadable file is recorded in
 /// `ScanSummary::errors` and skipped — it never aborts the scan.
 pub fn scan_root(db: &Database, cache_dir: &Path, root: &Path) -> Result<ScanSummary> {
+    // One transaction for the whole scan: SQLite's default is to fsync
+    // on every auto-committed statement, which is invisible against an
+    // in-memory test database but made a real on-disk 50k-file scan take
+    // over an hour instead of seconds (see Database::open's WAL note —
+    // this is the other half of that same fix). Held via RAII so any
+    // early `?` return below rolls back cleanly instead of leaving a
+    // half-applied scan committed.
+    let txn = db.conn.unchecked_transaction()?;
+
     let root_str = root.to_string_lossy().to_string();
     db.add_scan_root(&root_str)?;
 
@@ -132,6 +142,7 @@ pub fn scan_root(db: &Database, cache_dir: &Path, root: &Path) -> Result<ScanSum
     }
 
     db.mark_scan_root_scanned(&root_str, now())?;
+    txn.commit()?;
     Ok(summary)
 }
 

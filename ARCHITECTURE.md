@@ -393,6 +393,73 @@ confirm that CSS path too. Worth remembering: automated jsdom tests
 cannot catch this class of bug at all — jsdom doesn't compute real
 layout — so this was only reachable through actual on-device rendering.
 
+## Phase 6: library browsing at scale
+
+**Backend**: new `db/browse.rs` join queries (`list_tracks_for_browse`,
+`list_albums_for_browse`, `list_artists_for_browse`,
+`search_tracks_for_browse`) return the _whole_ result set in one call,
+joined and display-ready — virtualization is the frontend's job, not
+this layer's, so fetching 50k lightweight rows once is the right
+tradeoff versus paginating or re-fetching per scroll position. Seven new
+`src-tauri` commands wrap these plus `library_add_folder` (native
+folder picker via `tauri-plugin-dialog`, `xdg-portal` feature so it's a
+real portal dialog on Omarchy/Wayland rather than a GTK3 fallback),
+running the scan on a blocking thread per spec §19.
+
+**Frontend**: `LibraryContext` is the shared source of truth for
+tracks/albums/artists, hydrated on mount and refreshed after a folder
+scan. `Library`/`Albums`/`Artists` each use `@tanstack/react-virtual` —
+row virtualization for the first two, a responsive grid (columns
+computed from a `ResizeObserver`'d container width, spec §33) for
+Albums. Search is debounced (200ms) against the FTS5-backed
+`library_search` command.
+
+**Two real bugs, both caught only by seeding the actual on-disk app
+database with a 50k-track fixture** (not by any existing test, which
+all use an in-memory database):
+
+1. **The critical one**: scanning 50k files into the real database
+   didn't finish in 120 seconds (extrapolated: over an hour), versus
+   7.9s for the identical fixture in Phase 3's _in-memory_ benchmark.
+   Root cause: SQLite's defaults (rollback-journal mode,
+   `synchronous=FULL`) fsync on every auto-committed statement — invisible
+   against an in-memory database (no fsync cost at all), catastrophic
+   against a real disk. Fixed two ways: `Database::open` now sets
+   `journal_mode=WAL` + `synchronous=NORMAL` (the standard safe pairing
+   for a desktop app — still durable across an application crash, only
+   an OS crash/power loss could lose the last few WAL frames), and
+   `scan_root` now wraps its entire per-file loop in one transaction via
+   `Connection::unchecked_transaction()` (RAII — rolls back cleanly on
+   any early `?` return) instead of leaving every write auto-committed.
+   Result: **7.27s**, matching the in-memory benchmark almost exactly.
+   This is worth remembering as a general lesson, not just for this
+   project: an in-memory-database test suite can validate query
+   _correctness_ perfectly while saying nothing at all about real-disk
+   _write_ performance — the two are different enough in cost model that
+   one cannot stand in for the other.
+2. A test-mock gap (not a production bug): `App.test.tsx`'s `invoke`
+   mock didn't know about the new `library_*` commands and fell through
+   to resolving `undefined`, which crashed `Albums`/`Artists` on
+   `.length`. Fixed the mock; also hardened the IPC layer itself
+   (`listOrEmpty` in `lib/ipc.ts`) to coerce a non-array response to `[]`
+   rather than trust `invoke`'s compile-time-only type assertion — an
+   IPC boundary is worth defending like any other untrusted input (spec
+   §37), even though the real backend cannot currently produce this
+   case.
+
+**Verified on-device** with the real 50k-track fixture seeded into the
+actual app database (not the test suite): Music Library shows "50,000
+songs" and scrolls with only ~28 `.op-media-row` DOM nodes mounted at
+any time (confirmed via a temporary console log, removed after);
+Albums correctly aggregates to 500 albums with per-album track counts;
+Artists to 500 artists with per-artist album/track counts; the full
+joined browse query itself runs in 44ms at this scale.
+
+**Deliberately out of scope for this phase**: Album tiles and Artist
+rows are display-only — no click-through to a filtered/detail view yet.
+That's a better fit for the album/artist detail pages a later phase
+should build than for search-query hijacking bolted on here.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

@@ -29,3 +29,6 @@ player-core.workspace = true
 audio-engine.workspace = true
 linux-integration.workspace = true
 tokio.workspace = true
+tauri-plugin-dialog = { version = "2.7.3", default-features = false, features = [
+  "xdg-portal",
+] }

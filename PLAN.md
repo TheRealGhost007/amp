@@ -54,8 +54,18 @@ plan file's existence means work happened.
       state); fixed by switching the shell layout to Flexbox.
       State-based view switching, no router — simple and sufficient for
       a fixed sidebar with no deep-linking need.
-- [ ] **Phase 6 — Library Browsing at Scale**: virtualized lists, real
-      data, search against FTS5.
+- [x] **Phase 6 — Library Browsing at Scale**: real join queries backing
+      Library/Albums/Artists, `@tanstack/react-virtual` everywhere (grid
+      for Albums, rows for Library/Artists), debounced FTS5 search,
+      native folder picker (`xdg-portal`) wired to the real scan path.
+      Caught a critical bug only by seeding the real on-disk database
+      with 50k tracks (all existing tests use an in-memory database,
+      which hid it completely): SQLite's default fsync-per-commit made a
+      real scan take over an hour instead of 7.9s. Fixed with WAL +
+      synchronous=NORMAL + wrapping the scan in one transaction — back
+      to 7.27s. Verified on-device: 50k songs, 500 albums, 500 artists,
+      correct counts/sorting, ~28 DOM nodes mounted regardless of list
+      size, 44ms full browse query.
 - [ ] **Phase 7 — Now Playing / Mini-Player / Full Player**.
 - [ ] **Phase 8 — Queue & Playlists**: drag-reorder, CRUD.
 - [ ] **Phase 9 — Command Palette & Context Menus**.

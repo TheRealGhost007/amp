@@ -63,6 +63,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(AppState::new());
             spawn_player_tick_loop(app.handle().clone());
@@ -85,6 +86,13 @@ pub fn run() {
             commands::player::player_set_device,
             commands::settings::get_setting,
             commands::settings::set_setting,
+            commands::library::library_add_folder,
+            commands::library::library_list_scan_roots,
+            commands::library::library_remove_scan_root,
+            commands::library::library_list_tracks,
+            commands::library::library_list_albums,
+            commands::library::library_list_artists,
+            commands::library::library_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

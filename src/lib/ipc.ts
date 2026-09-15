@@ -6,6 +6,15 @@ export interface TrackRef {
   uri: string;
 }
 
+/** Converts an absolute filesystem path to a `file://` URI, percent-
+ * encoding each path segment individually — a bare `encodeURI` would
+ * leave characters like `#` and `?` unescaped, which GStreamer would
+ * then misparse as a URI fragment/query rather than part of the path. */
+export function pathToFileUri(path: string): string {
+  const segments = path.split("/").map(encodeURIComponent);
+  return `file://${segments.join("/")}`;
+}
+
 export interface AudioDevice {
   id: string;
   name: string;
@@ -33,6 +42,50 @@ export interface PlayerPosition {
   duration_ms: number | null;
 }
 
+export interface TrackListItem {
+  id: number;
+  path: string;
+  title: string;
+  artist_name: string | null;
+  album_title: string | null;
+  genre_name: string | null;
+  track_number: number | null;
+  disc_number: number | null;
+  duration_ms: number;
+  year: number | null;
+  has_embedded_art: boolean;
+  added_at: number;
+}
+
+export interface AlbumSummary {
+  id: number;
+  title: string;
+  artist_name: string | null;
+  year: number | null;
+  track_count: number;
+}
+
+export interface ArtistSummary {
+  id: number;
+  name: string;
+  album_count: number;
+  track_count: number;
+}
+
+export interface ScanFileError {
+  path: string;
+  message: string;
+}
+
+export interface ScanSummary {
+  added: number;
+  updated: number;
+  removed: number;
+  renamed: number;
+  unchanged: number;
+  errors: ScanFileError[];
+}
+
 /** Every Tauri command this app exposes, in one place — call sites
  * import from here rather than calling `invoke` directly, so a renamed
  * or reshaped command only needs updating once. */
@@ -53,6 +106,29 @@ export const player = {
     invoke<void>("player_set_crossfade_duration", { durationMs }),
   listDevices: () => invoke<AudioDevice[]>("player_list_devices"),
   setDevice: (deviceId: string | null) => invoke<void>("player_set_device", { deviceId }),
+};
+
+/** `invoke`'s return type is a compile-time assertion, not a runtime
+ * guarantee — an IPC boundary is worth defending like any other
+ * untrusted input (spec §37), so a malformed/missing list response
+ * degrades to empty rather than crashing every list/grid view that
+ * calls `.length` on it. */
+async function listOrEmpty<T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<T[]> {
+  const result = await invoke<T[]>(command, args);
+  return Array.isArray(result) ? result : [];
+}
+
+export const library = {
+  addFolder: (path: string) => invoke<ScanSummary>("library_add_folder", { path }),
+  listScanRoots: () => listOrEmpty<string>("library_list_scan_roots"),
+  removeScanRoot: (path: string) => invoke<void>("library_remove_scan_root", { path }),
+  listTracks: () => listOrEmpty<TrackListItem>("library_list_tracks"),
+  listAlbums: () => listOrEmpty<AlbumSummary>("library_list_albums"),
+  listArtists: () => listOrEmpty<ArtistSummary>("library_list_artists"),
+  search: (query: string) => listOrEmpty<TrackListItem>("library_search", { query }),
 };
 
 export const settings = {
