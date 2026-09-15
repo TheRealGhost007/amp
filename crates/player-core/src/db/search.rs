@@ -19,18 +19,18 @@ impl Database {
     ) -> Result<()> {
         self.remove_track_from_search_index(track_id)?;
         self.conn.execute(
-            "INSERT INTO tracks_fts (title, artist, album, genre, track_id)
+            "INSERT INTO tracks_fts (rowid, title, artist, album, genre)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![title, artist, album, genre, track_id],
+            params![track_id, title, artist, album, genre],
         )?;
         Ok(())
     }
 
+    /// `track_id` is this table's rowid (see `schema.rs`), so this is an
+    /// indexed point delete, not a table scan, at any library size.
     pub fn remove_track_from_search_index(&self, track_id: i64) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM tracks_fts WHERE track_id = ?1",
-            params![track_id],
-        )?;
+        self.conn
+            .execute("DELETE FROM tracks_fts WHERE rowid = ?1", params![track_id])?;
         Ok(())
     }
 
@@ -46,7 +46,7 @@ impl Database {
             return Ok(Vec::new());
         }
         let mut stmt = self.conn.prepare(
-            "SELECT track_id FROM tracks_fts WHERE tracks_fts MATCH ?1
+            "SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?1
              ORDER BY rank LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![fts_query, limit], |row| row.get(0))?;

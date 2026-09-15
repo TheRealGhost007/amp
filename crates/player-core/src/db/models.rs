@@ -60,6 +60,17 @@ pub struct NewTrack {
     pub content_hash: Option<String>,
 }
 
+/// Minimal per-track projection used by the scanner to diff the
+/// filesystem against the database without paying to deserialize every
+/// column of every row in a 50k-track library.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScanDiffRow {
+    pub id: i64,
+    pub path: String,
+    pub mtime: i64,
+    pub content_hash: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Playlist {
     pub id: i64,

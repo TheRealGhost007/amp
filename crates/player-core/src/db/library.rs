@@ -1,6 +1,6 @@
 //! Artists, genres, albums, and tracks — the core library tables.
 
-use super::models::{Album, Artist, Genre, NewTrack, Track};
+use super::models::{Album, Artist, Genre, NewTrack, ScanDiffRow, Track};
 use super::Database;
 use crate::error::Result;
 use rusqlite::{params, OptionalExtension};
@@ -92,6 +92,68 @@ impl Database {
         let id = self.conn.last_insert_rowid();
         self.get_track(id)?
             .ok_or_else(|| crate::error::Error::Internal("inserted track vanished".into()))
+    }
+
+    /// Full re-write of a track's metadata fields, used when the scanner
+    /// finds an on-disk file whose mtime changed. Path and id are
+    /// untouched — see `rename_track_path` for path changes.
+    pub fn update_track(&self, id: i64, track: &NewTrack) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tracks SET
+                title = ?1, artist_id = ?2, album_id = ?3, album_artist = ?4,
+                genre_id = ?5, track_number = ?6, disc_number = ?7, year = ?8,
+                duration_ms = ?9, has_embedded_art = ?10, mtime = ?11,
+                content_hash = ?12
+             WHERE id = ?13",
+            params![
+                track.title,
+                track.artist_id,
+                track.album_id,
+                track.album_artist,
+                track.genre_id,
+                track.track_number,
+                track.disc_number,
+                track.year,
+                track.duration_ms,
+                track.has_embedded_art,
+                track.mtime,
+                track.content_hash,
+                id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Repoints an existing track row at a new filesystem path — used by
+    /// the scanner's rename detection so favorites/playlists/history tied
+    /// to this track survive a file being moved or renamed, rather than
+    /// looking like a delete-then-add.
+    pub fn rename_track_path(&self, id: i64, new_path: &str, new_mtime: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tracks SET path = ?1, mtime = ?2 WHERE id = ?3",
+            params![new_path, new_mtime, id],
+        )?;
+        Ok(())
+    }
+
+    /// Minimal projection of every track whose path starts with
+    /// `path_prefix`, for the scanner to diff against the filesystem.
+    pub fn tracks_for_scan_diff(&self, path_prefix: &str) -> Result<Vec<ScanDiffRow>> {
+        let like_pattern = format!("{}%", path_prefix.replace('%', "\\%").replace('_', "\\_"));
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, mtime, content_hash FROM tracks
+             WHERE path LIKE ?1 ESCAPE '\\'",
+        )?;
+        let rows = stmt.query_map(params![like_pattern], |row| {
+            Ok(ScanDiffRow {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                mtime: row.get(2)?,
+                content_hash: row.get(3)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     pub fn get_track(&self, id: i64) -> Result<Option<Track>> {
@@ -253,5 +315,74 @@ mod tests {
         let tracks = db.list_tracks().unwrap();
         assert_eq!(tracks[0].path, "/music/b.flac");
         assert_eq!(tracks[1].path, "/music/a.flac");
+    }
+
+    #[test]
+    fn update_track_overwrites_metadata_but_keeps_path_and_id() {
+        let db = Database::open_in_memory().unwrap();
+        let track = db
+            .insert_track(&sample_track("/music/one.flac"), 1)
+            .unwrap();
+
+        let mut updated = sample_track("/music/one.flac");
+        updated.title = "One More Time (Remix)".into();
+        updated.duration_ms = 400_000;
+        db.update_track(track.id, &updated).unwrap();
+
+        let fetched = db.get_track(track.id).unwrap().unwrap();
+        assert_eq!(fetched.id, track.id);
+        assert_eq!(fetched.path, "/music/one.flac");
+        assert_eq!(fetched.title, "One More Time (Remix)");
+        assert_eq!(fetched.duration_ms, 400_000);
+    }
+
+    #[test]
+    fn rename_track_path_preserves_id() {
+        let db = Database::open_in_memory().unwrap();
+        let track = db
+            .insert_track(&sample_track("/music/old-name.flac"), 1)
+            .unwrap();
+        db.rename_track_path(track.id, "/music/new-name.flac", 2)
+            .unwrap();
+
+        assert!(db
+            .get_track_by_path("/music/old-name.flac")
+            .unwrap()
+            .is_none());
+        let renamed = db
+            .get_track_by_path("/music/new-name.flac")
+            .unwrap()
+            .unwrap();
+        assert_eq!(renamed.id, track.id);
+        assert_eq!(renamed.mtime, 2);
+    }
+
+    #[test]
+    fn tracks_for_scan_diff_filters_by_path_prefix() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_track(&sample_track("/music/albums/a.flac"), 1)
+            .unwrap();
+        db.insert_track(&sample_track("/podcasts/ep1.mp3"), 2)
+            .unwrap();
+
+        let rows = db.tracks_for_scan_diff("/music/").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, "/music/albums/a.flac");
+    }
+
+    #[test]
+    fn tracks_for_scan_diff_escapes_sql_like_wildcards_in_prefix() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_track(&sample_track("/music/100%_mix/a.flac"), 1)
+            .unwrap();
+        db.insert_track(&sample_track("/music/100X_mix/b.flac"), 2)
+            .unwrap();
+
+        // A literal "%" and "_" in the root path must not act as SQL
+        // LIKE wildcards, or an unrelated "100X_mix" folder would match
+        // a "100%_mix" prefix.
+        let rows = db.tracks_for_scan_diff("/music/100%_mix/").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, "/music/100%_mix/a.flac");
     }
 }

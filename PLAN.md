@@ -22,8 +22,13 @@ plan file's existence means work happened.
       covering schema creation, migration idempotency, and CRUD for every
       table (tracks, albums, artists, genres, playlists+playlist_tracks,
       favorites, playback_history, queue, settings, scan_state, search).
-- [ ] **Phase 3 — Library Scanning & Metadata**: async scan, `lofty` tags,
-      artwork pipeline, incremental rescan.
+- [x] **Phase 3 — Library Scanning & Metadata**: hand-rolled directory
+      walk, `lofty` tag extraction with graceful fallbacks, embedded/
+      folder artwork caching, mtime+hash-based new/modified/deleted/
+      renamed detection (rename preserves favorites/playlists/history).
+      19 new tests (52 total in `player-core`) including a real
+      corrupt-file case and a 50k-file perf fixture. Caught and fixed a real O(n²) FTS5 indexing bug the perf
+      fixture surfaced (50k files: 5+ min → 7.9s) — see ARCHITECTURE.md.
 - [ ] **Phase 4 — Audio Engine**: GStreamer playback, gapless, crossfade,
       EQ, device selection.
 - [ ] **Phase 5 — Application Shell & State Wiring**: sidebar, routing,

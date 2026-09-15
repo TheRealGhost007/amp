@@ -146,6 +146,52 @@ Tooltip, Popover, Menu, Dropdown, Dialog, Toast, Icon), and a named
 product identity — verified rendering correctly on-device (see Known
 tradeoff note above for the launch bug hit and fixed along the way).
 
+## Phase 3: library scanning, metadata, artwork
+
+Hand-rolled iterative (stack-based) directory walker rather than pulling
+in `walkdir` — the traversal needed here (filter by extension, skip
+hidden entries and symlinks) is simple enough to own directly, keeping
+the dependency list smaller. Metadata comes from `lofty`; a missing tag
+never blocks a file, it just falls back (title → filename stem, everything
+else → `None`), and an unparseable file is recorded in
+`ScanSummary::errors` and skipped, never aborting the scan (verified with
+a real corrupt-file test).
+
+**Change detection**: new/modified files are found by comparing on-disk
+mtime against the last-scanned mtime stored per track. Deleted vs.
+renamed is disambiguated by hashing the small set of files that don't
+match on path alone (a cheap streamed `DefaultHasher` over file content,
+not cryptographic — this is a heuristic for "same file, different path,"
+not a security boundary) and matching that hash against tracks that
+disappeared from their old path; a match repoints the existing row
+(`rename_track_path`) instead of delete-then-reinsert, so a renamed
+track's favorites/playlist membership/history survive. Verified this
+specifically: a test renames a favorited track's file and asserts the
+favorite is still set afterward.
+
+**Artwork**: embedded tag art takes priority over folder art
+(`cover`/`folder`/`album`/`front`.`jpg`/`jpeg`/`png`, matched
+case-insensitively), cached to disk keyed by content hash. No DB column
+tracks the cache path — the cache directory itself is the source of
+truth (a lookup is just "does `<cache_dir>/artwork/track-<hash>.<ext>`
+exist"), avoiding a schema column that could drift out of sync with the
+actual cache contents.
+
+**Performance bug caught by the 50k-file exit-criteria fixture**: the
+FTS5 `tracks_fts` table originally carried an explicit `track_id
+UNINDEXED` column, with every (re)index doing `DELETE ... WHERE track_id
+= ?` first. An `UNINDEXED` column cannot be used for lookups — every
+delete was a full table scan, so `n` sequential inserts-with-delete cost
+O(n²) overall. This was invisible at small scale (2,000 files: 0.83s) but
+made the 50k-file fixture take well over 5 minutes before being killed.
+Fixed by using FTS5's own `rowid` as the track id (set explicitly on
+insert, deleted by `WHERE rowid = ?`) instead of a separate unindexed
+column — rowid lookups are indexed by construction. After the fix, the
+same 50k-file scan completes in **7.9s** (release build, this machine).
+This is exactly the kind of regression the plan's Phase 13 performance
+pass exists to catch — it just happened to surface immediately here
+because Phase 3's own exit criteria already demanded a 50k-file run.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

@@ -48,12 +48,17 @@ pub fn migrations() -> Migrations<'static> {
         CREATE INDEX idx_tracks_genre_id ON tracks(genre_id);
         CREATE INDEX idx_tracks_added_at ON tracks(added_at);
 
+        -- No `track_id UNINDEXED` column: the track id IS this table's
+        -- rowid (set explicitly on insert). An UNINDEXED column can only
+        -- be filtered with a full table scan, which turns "delete this
+        -- track's old entry before reindexing" into O(n) per call and
+        -- the whole scan into O(n^2); rowid lookups stay fast at any
+        -- library size.
         CREATE VIRTUAL TABLE tracks_fts USING fts5(
             title,
             artist,
             album,
-            genre,
-            track_id UNINDEXED
+            genre
         );
 
         CREATE TABLE playlists (

@@ -13,3 +13,4 @@ tracing.workspace = true
 rusqlite.workspace = true
 rusqlite_migration.workspace = true
 directories.workspace = true
+lofty.workspace = true

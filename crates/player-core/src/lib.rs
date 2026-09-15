@@ -6,8 +6,10 @@
 
 pub mod db;
 pub mod error;
+pub mod scan;
 
 pub use db::Database;
+pub use scan::{scan_root, ScanFileError, ScanSummary};
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
