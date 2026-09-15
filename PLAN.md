@@ -29,8 +29,17 @@ plan file's existence means work happened.
       19 new tests (52 total in `player-core`) including a real
       corrupt-file case and a 50k-file perf fixture. Caught and fixed a real O(n²) FTS5 indexing bug the perf
       fixture surfaced (50k files: 5+ min → 7.9s) — see ARCHITECTURE.md.
-- [ ] **Phase 4 — Audio Engine**: GStreamer playback, gapless, crossfade,
-      EQ, device selection.
+- [x] **Phase 4 — Audio Engine**: GStreamer `playbin3`-per-slot backend
+      (`Backend` trait + `Slot::A`/`B`), gapless via `about-to-finish`,
+      crossfade via dual-slot PipeWire mixing + volume ramp, EQ +
+      pitch-preserving speed via an optional `audio-filter` bin, device
+      enumeration/switching. 14 tests against `SimulatedBackend`. Two
+      real bugs caught only by manual on-device verification against
+      actual GStreamer/PipeWire (speed-seek-before-preroll; a missed
+      crossfade window misreported as queue-exhausted) — both fixed,
+      see ARCHITECTURE.md. Manually verified on this machine: play/
+      pause/resume/seek/EQ/crossfade (audibly, dual-slot confirmed)/
+      device-switch all work against real hardware.
 - [ ] **Phase 5 — Application Shell & State Wiring**: sidebar, routing,
       Zustand playback store, Context providers, all views navigable.
 - [ ] **Phase 6 — Library Browsing at Scale**: virtualized lists, real

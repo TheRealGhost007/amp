@@ -192,6 +192,89 @@ This is exactly the kind of regression the plan's Phase 13 performance
 pass exists to catch — it just happened to surface immediately here
 because Phase 3's own exit criteria already demanded a 50k-file run.
 
+## Phase 4: audio engine
+
+**Note on how this phase was built**: a duplicate Claude Code session was
+independently working on this same project concurrently (a second
+terminal window left open on this machine) and had already sketched
+`types.rs`/`backend/mod.rs`/`backend/simulated.rs`/`backend/real.rs`
+(the `Backend` trait + `Slot::A`/`Slot::B` design) before being asked to
+stand down. That sketch was adopted as the foundation — reconciled,
+completed, debugged, and verified below — rather than discarded in favor
+of a second, independently-written draft, to avoid throwing away sound
+work.
+
+**Design**: `Backend` trait addressed by `Slot` (`A`/`B`), one
+`GstreamerBackend` instance manages both slots' `playbin3` pipelines
+internally. Gapless uses `playbin3`'s own `about-to-finish` signal
+(zero-gap, the standard mechanism). Crossfade is deliberately **not**
+in-process audio mixing — two independent `playbin3` slots each play to
+their own `pipewiresink`, and PipeWire mixes the concurrent client
+streams itself (exactly like two unrelated apps playing at once);
+`Player`'s linear volume ramp on both slots during the transition is
+what makes that mixing sound like a crossfade. This avoids building an
+in-process `audiomixer` bin entirely. EQ (`equalizer-10bands`) and
+pitch-preserving speed (`scaletempo`) are inserted via `playbin3`'s
+`audio-filter` property; both are treated as optional — if
+`gst-plugins-good` isn't installed, `Player` logs a warning and runs
+without them rather than failing to start (spec §27).
+
+`Player<B: Backend>` owns the crossfade/gapless timing state machine and
+is exercised entirely against `SimulatedBackend` in `cargo test` — no
+display, audio device, or GStreamer installation required for the test
+suite.
+
+**Two real bugs only found by testing against actual GStreamer/PipeWire
+hardware** (not caught by the simulated-backend unit tests, which is
+exactly why the plan calls for a manual on-device pass every phase that
+touches runtime behavior):
+
+1. **Speed-seek on a not-yet-prerolled pipeline.** `Player` applies the
+   stored playback rate to every freshly loaded slot, including the
+   default `1.0` case, before calling `play()`. GStreamer rejects a
+   rate-seek on a pipeline still in `NULL`/`READY` (not yet prerolled),
+   so the very first `play_now()` failed outright with `"Failed to
+   seek"`. Fixed in `backend/real.rs`: `rate == 1.0` is now a no-op (a
+   normal-speed pipeline never needs a seek at all), and any other rate
+   is skipped rather than erroring unless the pipeline is already at
+   least `Paused` — real speed changes happen interactively while a
+   track is already playing, so this matches actual usage.
+2. **A missed crossfade window was reported as a false "queue
+   exhausted."** `Player::tick` only checks "are we inside the crossfade
+   window" when it's called — but a real pipeline keeps playing in
+   wall-clock time between `tick()` calls. If the gap between ticks (or
+   time spent in other work between them) lets the active slot reach
+   genuine `EOS` before a tick ever gets to notice the window, the old
+   code treated that bare `Eos` as "nothing queued, stop" even though
+   `next` was set — reproduced live by inserting a few hundred ms of
+   `sleep()` between `seek()`/EQ calls and starting the tick loop.
+   Fixed in `player.rs`: `Eos` now checks `next` first and recovers by
+   advancing immediately on the same slot (a degraded, non-ramped
+   transition) rather than reporting `PlaybackFinished`; if a crossfade
+   is already in progress, the bare `Eos` from the old slot finishing
+   right as the ramp completes is correctly ignored, since the ramp's
+   own completion branch handles that transition. Covered by
+   `eos_with_a_queued_next_recovers_instead_of_reporting_finished`.
+
+**Manual on-device verification** (via two throwaway example binaries,
+removed after use — see git history if reproducing): real playback
+against actual generated WAV files through `GstreamerBackend` →
+`pipewiresink`, confirmed:
+- Play, pause (position freezes), resume, and seek (position jumped to
+  the seeked target) all work.
+- EQ band-setting doesn't error against a real `equalizer-10bands`
+  element.
+- Device enumeration returns this machine's real PipeWire sinks.
+- The smooth dual-slot volume-ramped crossfade actually ran on real
+  hardware: with tight, uninterrupted ticking from playback start, the
+  inactive slot was already ~1.9s into its own playback by the time a
+  2-second crossfade completed — consistent with both slots genuinely
+  running and mixing concurrently, not a same-slot fallback swap. It
+  was also audible: the 440Hz tone blended into 660Hz rather than
+  cutting.
+- Switching the output device mid-playback (to a different real
+  PipeWire sink) did not error or interrupt playback.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

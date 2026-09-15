@@ -6,6 +6,7 @@ authors.workspace = true
 description = "GStreamer-backed playback engine: decode, gapless, crossfade, EQ, device selection — no Tauri awareness"
 
 [dependencies]
+gstreamer.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

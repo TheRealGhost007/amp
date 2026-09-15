@@ -7,6 +7,15 @@ use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("audio pipeline error: {0}")]
+    Pipeline(String),
+
+    #[error("no such audio device: {0}")]
+    DeviceNotFound(String),
+
+    #[error("unsupported media: {0}")]
+    Unsupported(String),
+
     #[error("{0}")]
     Internal(String),
 }
@@ -21,6 +30,9 @@ pub struct ErrorPayload {
 impl Error {
     pub fn code(&self) -> &'static str {
         match self {
+            Error::Pipeline(_) => "PIPELINE_ERROR",
+            Error::DeviceNotFound(_) => "DEVICE_NOT_FOUND",
+            Error::Unsupported(_) => "UNSUPPORTED_MEDIA",
             Error::Internal(_) => "INTERNAL_ERROR",
         }
     }
