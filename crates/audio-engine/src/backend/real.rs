@@ -46,7 +46,6 @@ struct GstSlot {
 
 pub struct GstreamerBackend {
     slots: HashMap<Slot, GstSlot>,
-    devices_by_id: Mutex<HashMap<String, gstreamer::Device>>,
 }
 
 impl GstreamerBackend {
@@ -57,10 +56,24 @@ impl GstreamerBackend {
         slots.insert(Slot::A, Self::build_slot()?);
         slots.insert(Slot::B, Self::build_slot()?);
 
-        Ok(Self {
-            slots,
-            devices_by_id: Mutex::new(HashMap::new()),
-        })
+        Ok(Self { slots })
+    }
+
+    /// Live device enumeration — always queried fresh rather than cached,
+    /// so a device id is never stale by the time it's acted on (a cached
+    /// `id -> Device` map keyed by enumeration order would silently point
+    /// at the wrong hardware if a device was unplugged/replugged between
+    /// listing and selecting it).
+    fn enumerate_output_devices() -> Vec<gstreamer::Device> {
+        let monitor = gstreamer::DeviceMonitor::new();
+        monitor.add_filter(Some("Audio/Sink"), None);
+        if monitor.start().is_err() {
+            tracing::warn!("failed to start GStreamer device monitor");
+            return Vec::new();
+        }
+        let devices = monitor.devices().into_iter().collect();
+        monitor.stop();
+        devices
     }
 
     fn build_slot() -> Result<GstSlot> {
@@ -304,9 +317,9 @@ impl Backend for GstreamerBackend {
                 .build()
                 .map_err(|e| Error::Pipeline(format!("failed to create pipewiresink: {e}")))?,
             Some(id) => {
-                let devices = self.devices_by_id.lock().unwrap();
-                let device = devices
-                    .get(id)
+                let device = Self::enumerate_output_devices()
+                    .into_iter()
+                    .find(|d| d.display_name() == id)
                     .ok_or_else(|| Error::DeviceNotFound(format!("unknown output device {id}")))?;
                 device
                     .create_element(None)
@@ -332,27 +345,15 @@ impl Backend for GstreamerBackend {
     }
 
     fn list_output_devices(&self) -> Vec<AudioDevice> {
-        let monitor = gstreamer::DeviceMonitor::new();
-        monitor.add_filter(Some("Audio/Sink"), None);
-        if monitor.start().is_err() {
-            tracing::warn!("failed to start GStreamer device monitor");
-            return Vec::new();
-        }
-
-        let mut devices_by_id = self.devices_by_id.lock().unwrap();
-        devices_by_id.clear();
-        let mut result = Vec::new();
-        for (index, device) in monitor.devices().iter().enumerate() {
-            let id = format!("gst-device-{index}");
-            result.push(AudioDevice {
-                id: id.clone(),
+        Self::enumerate_output_devices()
+            .into_iter()
+            .enumerate()
+            .map(|(index, device)| AudioDevice {
+                id: device.display_name().to_string(),
                 name: device.display_name().to_string(),
                 is_default: index == 0,
-            });
-            devices_by_id.insert(id, device.clone());
-        }
-        monitor.stop();
-        result
+            })
+            .collect()
     }
 
     fn poll_events(&mut self, slot: Slot) -> Vec<BackendEvent> {

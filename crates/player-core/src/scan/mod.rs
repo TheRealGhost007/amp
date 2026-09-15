@@ -189,7 +189,15 @@ fn process_file(
         None => None,
     };
 
-    let cache_key = format!("track-{}", content_hash.as_deref().unwrap_or("unknown"));
+    // Falling back to a fixed "unknown" key here would let two different
+    // files that both fail to hash (a rare I/O error, not the common
+    // case) silently overwrite each other's cached artwork under the
+    // same cache filename. Hashing the path instead keeps the key unique
+    // per file even when content hashing fails.
+    let cache_key = format!(
+        "track-{}",
+        content_hash.clone().unwrap_or_else(|| hash_path(path))
+    );
     let artwork_cached = artwork::resolve_and_cache_artwork(
         &cache_dir.join("artwork"),
         &cache_key,
@@ -238,6 +246,15 @@ fn now() -> i64 {
 /// FLAC doesn't require reading it fully into memory at once. Only ever
 /// computed for the small set of files that changed in a given scan, not
 /// the whole library, so its cost is bounded regardless of library size.
+/// Deterministic per-path fallback used only when [`hash_file`] itself
+/// fails (a rare I/O error) — see its call site for why this must still
+/// be unique per file rather than a shared constant.
+fn hash_path(path: &Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hasher.write(path.to_string_lossy().as_bytes());
+    format!("{:016x}", hasher.finish())
+}
+
 fn hash_file(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     let mut file = fs::File::open(path)?;
@@ -257,6 +274,14 @@ fn hash_file(path: &Path) -> std::io::Result<String> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn hash_path_is_deterministic_and_distinguishes_files() {
+        let a = Path::new("/music/one.flac");
+        let b = Path::new("/music/two.flac");
+        assert_eq!(hash_path(a), hash_path(a));
+        assert_ne!(hash_path(a), hash_path(b));
+    }
 
     struct TestDir {
         path: std::path::PathBuf,

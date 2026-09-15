@@ -18,6 +18,12 @@ use crate::types::{AudioDevice, PlaybackState, PlayerEvent, Slot, TrackRef, EQ_B
 struct CrossfadeProgress {
     total_ms: u64,
     elapsed_ms: u64,
+    /// Captured when the crossfade starts, independent of `Player::next`
+    /// — if the caller reorders the queue mid-crossfade (a new
+    /// `set_next` call), that must not retarget a transition already
+    /// committed and playing on the inactive slot. `next` after that
+    /// point means "what comes after *this* crossfade finishes."
+    target: TrackRef,
 }
 
 pub struct Player<B: Backend> {
@@ -25,6 +31,10 @@ pub struct Player<B: Backend> {
     active: Slot,
     current: Option<TrackRef>,
     next: Option<TrackRef>,
+    /// Tracked explicitly rather than inferred from `position_ms()` —
+    /// both backends can report a valid position for a loaded-but-paused
+    /// slot, so "position is Some" is not a proxy for "is playing."
+    is_playing: bool,
     volume: f64,
     muted: bool,
     eq_bands: [f64; EQ_BAND_COUNT],
@@ -40,6 +50,7 @@ impl<B: Backend> Player<B> {
             active: Slot::A,
             current: None,
             next: None,
+            is_playing: false,
             volume: 1.0,
             muted: false,
             eq_bands: [0.0; EQ_BAND_COUNT],
@@ -54,7 +65,7 @@ impl<B: Backend> Player<B> {
     }
 
     pub fn is_playing(&self) -> bool {
-        self.crossfade.is_some() || self.current.is_some() && self.position_ms().is_some()
+        self.is_playing
     }
 
     pub fn position_ms(&self) -> Option<u64> {
@@ -90,6 +101,7 @@ impl<B: Backend> Player<B> {
         self.apply_slot_settings(Slot::A, self.volume)?;
         self.backend.play(Slot::A)?;
         self.current = Some(track);
+        self.is_playing = true;
 
         Ok(vec![
             PlayerEvent::TrackAdvanced,
@@ -99,11 +111,13 @@ impl<B: Backend> Player<B> {
 
     pub fn pause(&mut self) -> Result<Vec<PlayerEvent>> {
         self.backend.pause(self.active)?;
+        self.is_playing = false;
         Ok(vec![PlayerEvent::StateChanged(PlaybackState::Paused)])
     }
 
     pub fn resume(&mut self) -> Result<Vec<PlayerEvent>> {
         self.backend.play(self.active)?;
+        self.is_playing = true;
         Ok(vec![PlayerEvent::StateChanged(PlaybackState::Playing)])
     }
 
@@ -112,6 +126,7 @@ impl<B: Backend> Player<B> {
         self.backend.stop(Slot::B)?;
         self.crossfade = None;
         self.current = None;
+        self.is_playing = false;
         Ok(vec![PlayerEvent::StateChanged(PlaybackState::Stopped)])
     }
 
@@ -223,6 +238,7 @@ impl<B: Backend> Player<B> {
                         out.push(PlayerEvent::TrackAdvanced);
                     } else {
                         self.current = None;
+                        self.is_playing = false;
                         out.push(PlayerEvent::StateChanged(PlaybackState::Stopped));
                         out.push(PlayerEvent::PlaybackFinished);
                     }
@@ -241,9 +257,14 @@ impl<B: Backend> Player<B> {
                         self.backend.load(inactive, &next.uri)?;
                         self.apply_slot_settings(inactive, 0.0)?;
                         self.backend.play(inactive)?;
+                        // Committed: this crossfade owns `next` from here.
+                        // `set_next` calls from this point on target
+                        // whatever comes *after* this transition finishes.
+                        self.next = None;
                         self.crossfade = Some(CrossfadeProgress {
                             total_ms,
                             elapsed_ms: 0,
+                            target: next,
                         });
                     }
                 }
@@ -263,14 +284,13 @@ impl<B: Backend> Player<B> {
             self.backend.set_volume(inactive, self.volume * fade_in)?;
 
             if t >= 1.0 {
+                let target = progress.target.clone();
                 self.backend.stop(active)?;
                 self.active = inactive;
                 self.backend.set_volume(self.active, self.volume)?;
                 self.crossfade = None;
-                if let Some(next) = self.next.take() {
-                    self.current = Some(next);
-                    out.push(PlayerEvent::TrackAdvanced);
-                }
+                self.current = Some(target);
+                out.push(PlayerEvent::TrackAdvanced);
             }
         }
 
@@ -297,6 +317,32 @@ mod tests {
         assert!(events.contains(&PlayerEvent::TrackAdvanced));
         assert_eq!(player.current_track(), Some(&track(1, "a")));
         assert_eq!(player.position_ms(), Some(0));
+        assert!(player.is_playing());
+    }
+
+    #[test]
+    fn is_playing_reflects_pause_not_just_position_availability() {
+        // Regression test: both backends can report a valid position for
+        // a loaded-but-paused slot, so `is_playing()` must not infer
+        // state from `position_ms().is_some()`.
+        let mut player = Player::new(SimulatedBackend::new());
+        assert!(!player.is_playing());
+
+        player.play_now(track(1, "a")).unwrap();
+        assert!(player.is_playing());
+
+        player.pause().unwrap();
+        assert!(
+            player.position_ms().is_some(),
+            "a paused slot still reports a position"
+        );
+        assert!(!player.is_playing());
+
+        player.resume().unwrap();
+        assert!(player.is_playing());
+
+        player.stop().unwrap();
+        assert!(!player.is_playing());
     }
 
     #[test]
@@ -351,6 +397,40 @@ mod tests {
         assert!(events.contains(&PlayerEvent::TrackAdvanced));
         assert_eq!(player.current_track(), Some(&track(2, "b")));
         assert_eq!(player.active, Slot::B);
+    }
+
+    #[test]
+    fn reordering_next_mid_crossfade_does_not_retarget_the_in_flight_transition() {
+        // Regression test: the inactive slot is already loaded and
+        // playing "b" once the crossfade window is entered. If the
+        // caller reorders the upcoming queue at that point (a new
+        // `set_next`), the crossfade already in flight must still land
+        // on "b" — the new value is for whatever comes *after* it.
+        let mut player = Player::new(SimulatedBackend::new());
+        player.set_crossfade_duration(Some(2000)).unwrap();
+        player.play_now(track(1, "a")).unwrap();
+        player.backend.set_duration_for_test(Slot::A, 10_000);
+        player.set_next(Some(track(2, "b"))).unwrap();
+
+        player.backend.advance(Slot::A, 7000);
+        player.tick(7000).unwrap();
+        player.backend.advance(Slot::A, 1000);
+        player.tick(1000).unwrap();
+        assert!(
+            player.backend.position_ms(Slot::B).is_some(),
+            "crossfade should have started"
+        );
+
+        // Queue reordered mid-crossfade.
+        player.set_next(Some(track(3, "c"))).unwrap();
+
+        let events = player.tick(1000).unwrap();
+        assert!(events.contains(&PlayerEvent::TrackAdvanced));
+        assert_eq!(
+            player.current_track(),
+            Some(&track(2, "b")),
+            "in-flight crossfade must finish on b, not c"
+        );
     }
 
     /// Regression test for a real bug hit against actual GStreamer

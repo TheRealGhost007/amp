@@ -1,4 +1,11 @@
-import { ReactNode, RefObject, useEffect, useLayoutEffect, useState } from "react";
+import {
+  ReactNode,
+  RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import "./Popover.css";
 
@@ -22,6 +29,7 @@ export function Popover({
   placement = "bottom-start",
 }: PopoverProps) {
   const [style, setStyle] = useState<React.CSSProperties>({});
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) return;
@@ -40,7 +48,16 @@ export function Popover({
   useEffect(() => {
     if (!open) return;
     function handlePointerDown(e: PointerEvent) {
-      if (anchorRef.current?.contains(e.target as Node)) return;
+      const target = e.target as Node;
+      // A click inside the popover's own portaled content (e.g. a menu
+      // item) must not count as "outside" — it's rendered into
+      // document.body via a portal, so it's never a DOM descendant of
+      // anchorRef, and without this check every click inside the
+      // popover would close it on pointerdown before the item's own
+      // onClick ever ran.
+      if (anchorRef.current?.contains(target) || contentRef.current?.contains(target)) {
+        return;
+      }
       onClose();
     }
     function handleKeyDown(e: KeyboardEvent) {
@@ -57,7 +74,7 @@ export function Popover({
   if (!open) return null;
 
   return createPortal(
-    <div className="op-popover" style={style}>
+    <div ref={contentRef} className="op-popover" style={style}>
       {children}
     </div>,
     document.body,

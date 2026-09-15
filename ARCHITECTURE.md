@@ -128,15 +128,15 @@ of the desktop.
 **Contrast — checked against WCAG 2.1 AA (4.5:1 normal text, 3:1 large
 text/UI components)**:
 
-| Pair | Theme | Ratio | Passes |
-|---|---|---|---|
-| foreground / background | Omarchy Dark | 10.1:1 | Yes |
-| accent / background | Omarchy Dark | 7.4:1 | Yes |
-| danger / background | Omarchy Dark | 5.0:1 | Yes |
-| foreground / background | Omarchy Light | 15.7:1 | Yes |
-| accent / background | Omarchy Light | 5.0:1 | Yes (darkened from the dark theme's raw #e68e0d, which only cleared ~4.0:1 here) |
-| danger / background | Omarchy Light | 5.6:1 | Yes |
-| foreground / background | AMOLED Dark | 11.3:1 | Yes |
+| Pair                    | Theme         | Ratio  | Passes                                                                           |
+| ----------------------- | ------------- | ------ | -------------------------------------------------------------------------------- |
+| foreground / background | Omarchy Dark  | 10.1:1 | Yes                                                                              |
+| accent / background     | Omarchy Dark  | 7.4:1  | Yes                                                                              |
+| danger / background     | Omarchy Dark  | 5.0:1  | Yes                                                                              |
+| foreground / background | Omarchy Light | 15.7:1 | Yes                                                                              |
+| accent / background     | Omarchy Light | 5.0:1  | Yes (darkened from the dark theme's raw #e68e0d, which only cleared ~4.0:1 here) |
+| danger / background     | Omarchy Light | 5.6:1  | Yes                                                                              |
+| foreground / background | AMOLED Dark   | 11.3:1 | Yes                                                                              |
 
 **Before/after**: before this phase the app was an unstyled Tauri/React
 tutorial scaffold (default logos, default black-on-white text, no theme
@@ -234,7 +234,7 @@ touches runtime behavior):
    default `1.0` case, before calling `play()`. GStreamer rejects a
    rate-seek on a pipeline still in `NULL`/`READY` (not yet prerolled),
    so the very first `play_now()` failed outright with `"Failed to
-   seek"`. Fixed in `backend/real.rs`: `rate == 1.0` is now a no-op (a
+seek"`. Fixed in `backend/real.rs`: `rate == 1.0` is now a no-op (a
    normal-speed pipeline never needs a seek at all), and any other rate
    is skipped rather than erroring unless the pipeline is already at
    least `Paused` — real speed changes happen interactively while a
@@ -260,6 +260,7 @@ touches runtime behavior):
 removed after use — see git history if reproducing): real playback
 against actual generated WAV files through `GstreamerBackend` →
 `pipewiresink`, confirmed:
+
 - Play, pause (position freezes), resume, and seek (position jumped to
   the seeked target) all work.
 - EQ band-setting doesn't error against a real `equalizer-10bands`
@@ -274,6 +275,67 @@ against actual generated WAV files through `GstreamerBackend` →
   cutting.
 - Switching the output device mid-playback (to a different real
   PipeWire sink) did not error or interrupt playback.
+
+## Post-Phase-4 bug-hunt pass (2026-09-15)
+
+A dedicated review pass across the whole app (not tied to a specific
+phase) found and fixed five real bugs, none caught by the existing test
+suite until new tests were added alongside each fix:
+
+1. **`Player::is_playing()` didn't track pause state at all.** It
+   inferred "playing" from `position_ms().is_some()`, but both
+   `SimulatedBackend` and `GstreamerBackend` report a valid position for
+   a loaded-but-paused slot too — so the flag would read `true` any time
+   a track was loaded, paused or not. Fixed by tracking `is_playing` as
+   explicit state set by every transition (`play_now`/`pause`/`resume`/
+   `stop`/EOS-with-no-next), not derived. Was unused so far (no caller
+   yet), which is exactly why nothing caught it — worth remembering that
+   "no test failure" isn't the same as "no bug" for not-yet-wired code.
+2. **Output device ids were positional (`"gst-device-{index}"`) and
+   cached in a map rebuilt on every `list_devices()` call.** If the
+   device list changed (unplug/replug) between listing and selecting, a
+   previously-returned id could silently resolve to the wrong hardware,
+   or fail to resolve at all after a cache-clearing relist. Fixed by
+   removing the cache entirely and keying by the device's display name,
+   looked up fresh at selection time — no positional/cached state to go
+   stale.
+3. **Reordering the queue mid-crossfade retargeted an already-in-flight
+   transition.** `set_next` unconditionally overwrote `Player::next`;
+   the crossfade-completion code read `next` at completion time, so a
+   reorder during the crossfade window made the transition land on the
+   *new* next track's id while the audio actually crossfading in was
+   still the *old* one — track metadata and audio would disagree.
+   Fixed by capturing the crossfade's target track when the transition
+   commits (not read again at completion), so `next` becomes freely
+   reassignable mid-crossfade for whatever should follow it.
+4. **Artwork cache-key collision when content hashing fails.** The
+   cache key fell back to a fixed `"track-unknown"` string when
+   `hash_file` errored (a rare I/O failure) — a second such file would
+   silently overwrite the first's cached artwork. Fixed by hashing the
+   file path itself as the fallback, which is always available and
+   unique per file even when content hashing isn't.
+5. **The Popover outside-click handler didn't recognize its own
+   content.** `Popover` portals its content to `document.body`, so it's
+   never a DOM descendant of `anchorRef` — the pointerdown-outside check
+   only tested against the anchor, meaning a pointerdown on *any* menu
+   item (inside the portaled content) counted as "outside" and closed
+   the menu before the item's own `onClick` could fire. This broke every
+   menu action silently: it looked correct in a static screenshot
+   (nothing about it is visually wrong) and only failed on actual
+   interaction, which is exactly why it survived Phase 1's visual
+   verification. Fixed by also checking the portaled content's own ref.
+   First attempt at a regression test for this passed even against the
+   unfixed code — the test harness hardcoded `open` as a literal `true`
+   instead of wiring it to real state via `onClose`, so the popover
+   never actually unmounted regardless of the bug. Rewriting the harness
+   to use real state (matching how every actual call site works) made
+   the test correctly fail without the fix and pass with it — confirmed
+   by deliberately reverting the fix and re-running.
+
+**Lesson**: a component or method with no caller yet, or a test harness
+that doesn't mirror real usage, will not surface a bug no matter how
+thorough it looks — verify a fix's test actually fails without the fix
+before trusting it, not just that it passes with the fix.
 
 ## Phase 0 status
 
