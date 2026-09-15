@@ -11,6 +11,18 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("database error: {0}")]
+    Database(#[from] rusqlite::Error),
+
+    #[error("migration error: {0}")]
+    Migration(#[from] rusqlite_migration::Error),
+
+    #[error("could not resolve application directories for this platform")]
+    NoAppDirs,
+
+    #[error("{0}")]
+    NotFound(String),
+
     #[error("{0}")]
     Internal(String),
 }
@@ -26,6 +38,10 @@ impl Error {
     pub fn code(&self) -> &'static str {
         match self {
             Error::Io(_) => "IO_ERROR",
+            Error::Database(_) => "DATABASE_ERROR",
+            Error::Migration(_) => "MIGRATION_ERROR",
+            Error::NoAppDirs => "NO_APP_DIRS",
+            Error::NotFound(_) => "NOT_FOUND",
             Error::Internal(_) => "INTERNAL_ERROR",
         }
     }

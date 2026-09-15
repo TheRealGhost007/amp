@@ -16,7 +16,12 @@ plan file's existence means work happened.
       on-device: launched, hit the known WebKitGTK/NVIDIA/Wayland crash,
       fixed with the same workaround already proven in mc-launcher/
       rgb-control-center, then confirmed rendering via screenshot.
-- [ ] **Phase 2 — Persistence Layer**: SQLite schema + migrations + FTS5.
+- [x] **Phase 2 — Persistence Layer**: SQLite schema + migrations + FTS5
+      search index in `player-core`. 11 tables, indexes on
+      artist_id/album_id/genre_id/added_at/played_at, 29 unit tests
+      covering schema creation, migration idempotency, and CRUD for every
+      table (tracks, albums, artists, genres, playlists+playlist_tracks,
+      favorites, playback_history, queue, settings, scan_state, search).
 - [ ] **Phase 3 — Library Scanning & Metadata**: async scan, `lofty` tags,
       artwork pipeline, incremental rescan.
 - [ ] **Phase 4 — Audio Engine**: GStreamer playback, gapless, crossfade,
