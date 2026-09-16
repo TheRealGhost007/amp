@@ -72,6 +72,32 @@ export interface ArtistSummary {
   track_count: number;
 }
 
+export interface QueueTrackItem {
+  id: number;
+  track: TrackListItem;
+}
+
+export interface PlaylistSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  track_count: number;
+}
+
+export interface Playlist {
+  id: number;
+  name: string;
+  description: string | null;
+  artwork_path: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PlaylistTrackItem {
+  id: number;
+  track: TrackListItem;
+}
+
 export interface ScanFileError {
   path: string;
   message: string;
@@ -135,6 +161,33 @@ export const favorites = {
   isFavorite: (trackId: number) => invoke<boolean>("favorites_is_favorite", { trackId }),
   toggle: (trackId: number) => invoke<boolean>("favorites_toggle", { trackId }),
   listIds: () => listOrEmpty<number>("favorites_list_ids"),
+};
+
+export const queue = {
+  list: () => listOrEmpty<QueueTrackItem>("queue_list"),
+  add: (trackId: number) => invoke<number>("queue_add", { trackId }),
+  playNext: (trackId: number) => invoke<number>("queue_play_next", { trackId }),
+  remove: (queueItemId: number) => invoke<void>("queue_remove", { queueItemId }),
+  reorder: (queueItemIds: number[]) => invoke<void>("queue_reorder", { queueItemIds }),
+  clear: () => invoke<void>("queue_clear"),
+};
+
+export const playlists = {
+  list: () => listOrEmpty<PlaylistSummary>("playlists_list"),
+  create: (name: string) => invoke<Playlist>("playlists_create", { name }),
+  rename: (playlistId: number, name: string) =>
+    invoke<void>("playlists_rename", { playlistId, name }),
+  setDescription: (playlistId: number, description: string | null) =>
+    invoke<void>("playlists_set_description", { playlistId, description }),
+  delete: (playlistId: number) => invoke<void>("playlists_delete", { playlistId }),
+  listTracks: (playlistId: number) =>
+    listOrEmpty<PlaylistTrackItem>("playlists_list_tracks", { playlistId }),
+  addTrack: (playlistId: number, trackId: number) =>
+    invoke<number>("playlists_add_track", { playlistId, trackId }),
+  removeTrack: (playlistTrackId: number) =>
+    invoke<void>("playlists_remove_track", { playlistTrackId }),
+  reorderTracks: (playlistId: number, playlistTrackIds: number[]) =>
+    invoke<void>("playlists_reorder_tracks", { playlistId, playlistTrackIds }),
 };
 
 export const settings = {

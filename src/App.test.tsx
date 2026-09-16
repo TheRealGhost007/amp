@@ -18,7 +18,10 @@ vi.mock("@tauri-apps/api/core", () => ({
       command === "library_list_tracks" ||
       command === "library_list_albums" ||
       command === "library_list_artists" ||
-      command === "library_search"
+      command === "library_search" ||
+      command === "queue_list" ||
+      command === "playlists_list" ||
+      command === "favorites_list_ids"
     ) {
       return Promise.resolve([]);
     }

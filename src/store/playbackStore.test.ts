@@ -17,6 +17,7 @@ vi.mock("../lib/ipc", () => ({
     seek: vi.fn(),
     setVolume: vi.fn(),
     setMuted: vi.fn(),
+    setNext: vi.fn(),
   },
   favorites: {
     isFavorite: (...args: unknown[]) => isFavoriteMock(...args),
@@ -24,6 +25,13 @@ vi.mock("../lib/ipc", () => ({
   },
   onPlayerEvent: vi.fn().mockResolvedValue(() => {}),
   onPlayerPosition: vi.fn().mockResolvedValue(() => {}),
+}));
+
+// playbackStore's playTrack re-arms the backend's `next` from the queue
+// after every playNow/playPrevious — irrelevant to the race-guard
+// behavior these tests exercise, so stubbed out entirely.
+vi.mock("./queueStore", () => ({
+  useQueueStore: { getState: () => ({ syncNext: vi.fn(), consumeHead: vi.fn() }) },
 }));
 
 const { usePlaybackStore } = await import("./playbackStore");
@@ -86,5 +94,50 @@ describe("playbackStore.playNow race guard", () => {
     await p2;
 
     expect(usePlaybackStore.getState().currentTrack).toEqual(trackB);
+  });
+});
+
+describe("playbackStore history / playPrevious", () => {
+  const trackA = { id: 1, uri: "file:///a.flac" };
+  const trackB = { id: 2, uri: "file:///b.flac" };
+  const trackC = { id: 3, uri: "file:///c.flac" };
+
+  beforeEach(() => {
+    playNowMock.mockReset().mockResolvedValue(undefined);
+    isFavoriteMock.mockReset().mockResolvedValue(false);
+    usePlaybackStore.setState({
+      currentTrack: null,
+      isPlaying: false,
+      isFavorite: false,
+      history: [],
+    });
+  });
+
+  it("pushes the outgoing track onto history on playNow, most recent first", async () => {
+    await usePlaybackStore.getState().playNow(trackA);
+    await usePlaybackStore.getState().playNow(trackB);
+    await usePlaybackStore.getState().playNow(trackC);
+
+    expect(usePlaybackStore.getState().history).toEqual([trackB, trackA]);
+  });
+
+  it("steps backward through history without re-pushing the track being left, so repeated Previous walks further back instead of oscillating", async () => {
+    await usePlaybackStore.getState().playNow(trackA);
+    await usePlaybackStore.getState().playNow(trackB);
+    await usePlaybackStore.getState().playNow(trackC);
+
+    await usePlaybackStore.getState().playPrevious();
+    expect(usePlaybackStore.getState().currentTrack).toEqual(trackB);
+    expect(usePlaybackStore.getState().history).toEqual([trackA]);
+
+    await usePlaybackStore.getState().playPrevious();
+    expect(usePlaybackStore.getState().currentTrack).toEqual(trackA);
+    expect(usePlaybackStore.getState().history).toEqual([]);
+  });
+
+  it("does nothing when history is empty", async () => {
+    await usePlaybackStore.getState().playPrevious();
+    expect(playNowMock).not.toHaveBeenCalled();
+    expect(usePlaybackStore.getState().currentTrack).toBeNull();
   });
 });

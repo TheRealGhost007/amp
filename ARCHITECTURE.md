@@ -597,24 +597,25 @@ their frontend call sites, and `linux-integration` remains the empty
 Phase-11 scaffold it's supposed to be at this point.
 
 **`audio-engine`** — two real bugs, both in `tick()`'s error handling:
+
 1. A failed `backend.load()` during EOS-recovery or crossfade-start
    propagated via `?`, aborting the whole tick and discarding every event
    accumulated that tick. Worse: in the EOS-recovery path `self.next` had
    already been cleared by `.take()` before the fallible call, so nothing
    would ever retry — the player froze forever on the stale `current`
    track with a dead pipeline and zero visible error. In the
-   crossfade-start path `self.next` was *not* yet cleared, so the
+   crossfade-start path `self.next` was _not_ yet cleared, so the
    identical failing load would retry every 200ms tick for the rest of
    the crossfade window. Fixed by extracting a `load_and_play` helper and
    handling its `Result` explicitly at both call sites: EOS-recovery
    failure now reports `PlayerEvent::Error` and finishes gracefully
    (matching the existing no-next branch); crossfade-start failure
-   reports the error, clears `next` once, and — since the *current* track
+   reports the error, clears `next` once, and — since the _current_ track
    is still playing fine, only the preload failed — leaves it alone
    rather than stopping good audio, letting its own natural EOS report
    `PlaybackFinished` normally later. Also: `poll_events` was only ever
    called on `self.active`, so a real decode error on the slot being
-   crossfaded *into* would sit unread on its bus and never surface; now
+   crossfaded _into_ would sit unread on its bus and never surface; now
    polled (for `Error` only) during an active crossfade too.
 2. `set_playback_speed` only forwarded to `self.active`, unlike
    `set_muted`/`set_eq_band`, which explicitly apply to both slots "so a
@@ -627,6 +628,7 @@ Phase-11 scaffold it's supposed to be at this point.
    backend couldn't otherwise trigger.
 
 **`player-core`** — three real bugs:
+
 1. **Data loss**: rename-detection matched a new file against the full
    `missing` list without excluding rows an earlier file in the same scan
    had already claimed. Two on-disk files sharing one content hash (e.g.
@@ -642,13 +644,13 @@ Phase-11 scaffold it's supposed to be at this point.
    `.optional()`). Not reachable from any current caller, but exactly the
    "looks fine until something finally calls it" shape this project has
    hit before (the original `is_playing()` bug). Fixed with `.optional()`
-   + `Option::flatten` (the column is itself nullable, so there are two
-   layers of optionality to collapse).
+   - `Option::flatten` (the column is itself nullable, so there are two
+     layers of optionality to collapse).
 3. **Design gap in unshipped code**: `reorder_playlist` and (the
    since-renamed) `remove_track_from_playlist` keyed off `track_id`, but
    nothing in the schema prevents the same track appearing in a playlist
    twice — `playlist_tracks` has its own `id` primary key precisely for
-   this reason, unused until now. A track added twice would have *both*
+   this reason, unused until now. A track added twice would have _both_
    occurrences moved/removed by any single reorder/remove call, making
    independent occurrences impossible to manage. Not yet reachable (no
    playlist UI exists before Phase 8), but fixed now rather than let
@@ -660,6 +662,7 @@ Phase-11 scaffold it's supposed to be at this point.
 
 **Frontend** — three real bugs plus one off-by-one in code already being
 touched:
+
 1. **`Menu` never received keyboard focus on open**, so arrow-key
    navigation was completely dead until the user manually Tabbed or
    clicked into an item — a real, reachable break of the app's stated
@@ -705,7 +708,102 @@ temporary revert) before the fix was restored. New tests: 4 in
 needed a hand-rolled `@tanstack/react-virtual` mock, since jsdom reports a
 zero-size scroll container and the real virtualizer renders nothing at
 all under that condition — worth remembering for any future test that
-needs to assert on virtualized row *content*, not just row count).
+needs to assert on virtualized row _content_, not just row count).
+
+## Phase 8: queue and playlists
+
+**Queue vs. `Player::next`, kept deliberately distinct** — `audio-engine`'s
+own doc comment already anticipated this split: `next` is a single
+look-ahead slot for gapless/crossfade preloading; the real ordered
+"what plays after this" list is `player-core`'s `queue` table plus the
+frontend. Phase 8 is what actually wires that up. `queueStore.ts`
+(Zustand) owns the persisted queue and is the only thing that calls
+`player.setNext(...)` — it re-syncs the backend's `next` to the queue's
+current head after every mutation, and `playbackStore` calls into it at
+exactly two points: `consumeHead()` when a `TrackAdvanced` event reports
+the backend consumed the armed `next` naturally (gapless/crossfade), and
+`syncNext()` after `playNow`/`playPrevious` (which clear the backend's
+`next` as a side effect of jumping straight to an arbitrary track, so it
+needs re-arming from the still-intact queue). Both `queue` and
+`playlist_tracks` rows carry their own `id`, separate from `track_id`,
+specifically so a track can appear more than once and still be
+independently reordered/removed — `playlist_tracks`' row-identity bug
+fixed in the prior bug-hunt pass turned out to be exactly the schema
+Phase 8 needed; `queue.rs` was built the same way from the start.
+
+**Real Previous, not a fake placeholder**: `playbackStore` keeps an
+in-memory-only `history: TrackRef[]` stack (capped at 50, not
+persisted — resets on restart like most players' back button, since
+persisting "what you just skipped past" isn't a real requirement here).
+`playNow`/the `TrackAdvanced` handler push the outgoing track onto it;
+`playPrevious` pops and replays without re-pushing what's being left —
+that asymmetry matters: re-pushing would make repeated Previous presses
+oscillate between two tracks instead of walking further back (caught by
+a real regression test, `playbackStore.test.ts`'s "does not oscillate"
+case). Previous never touches the persisted queue; it's a pure
+convenience rewind, independent of the queue's forward-only progression.
+`useNowPlaying` (Phase 7) now derives `hasNext`/`hasPrevious` from the
+real queue/history instead of the library-sort-order fallback it
+shipped with — that fallback is fully retired, not just superseded.
+
+**UI**: `Queue.tsx` and the new `PlaylistDetail.tsx` share one
+`SortableRow` component (`@dnd-kit/sortable` + a drag-handle affordance)
+wrapping plain `MediaRow`s, rather than duplicating drag chrome per
+view. `MediaRow` gained an optional `actions` prop (a "..." trigger
+opening the existing `Menu` component) — Library rows use it for
+"Play Next"/"Add to Queue"/"Add to Playlist…", intentionally reusing
+Phase 1's `Menu`/`Popover` rather than building bespoke per-row UI;
+Phase 9's shared context-menu component will likely absorb and expand
+this rather than start from scratch. A new `ConfirmDialog` primitive
+(spec §27/§40: destructive actions need a confirmation step) gates
+playlist deletion from both the list and detail views. Playlist
+"artwork" is deliberately scoped to the existing deterministic
+placeholder-gradient system (`Artwork`'s seed hashing, unchanged) rather
+than a custom image-upload flow — real artwork editing is Phase 10's
+job, once the metadata-editor infrastructure exists to do it properly
+rather than bolting on a one-off picker here.
+
+**Real bug caught by on-device verification, not by any test**:
+`Queue.tsx`'s top-level branch originally gated the entire "Up Next"
+list on `!track` (nothing currently playing), so a genuinely non-empty
+queue rendered the misleading "Queue is empty" empty state whenever
+nothing happened to be playing yet — e.g. right after seeding a queue
+before ever pressing play. Screenshotting the seeded-but-not-playing
+state (the natural first thing to check) caught this immediately; no
+unit test exercised "queue has items, nothing is playing" as a distinct
+case from "queue and nothing playing are both empty." Fixed by gating
+the empty state on `!track && items.length === 0` and making the
+"Now Playing" card conditional on `track` independently of the list
+below it.
+
+**Second real bug, also on-device-only**: `PlaylistDetail`'s "playlist
+was deleted elsewhere, go back" guard called `onBack()` (the parent
+`Playlists` component's `setSelectedId(null)`) directly in the render
+body, which React flags (`Cannot update a component while rendering a
+different component`) — and it fired spuriously on every fresh app
+launch, because `playlistsStore`'s own fetch hadn't resolved yet on the
+very first render, making a playlist that genuinely exists briefly look
+"not found." Both problems shared one fix: added a `playlistsLoading`
+check so "still loading" and "genuinely gone" are distinguished, and
+moved the `onBack()` call into a `useEffect` keyed on
+`(playlistsLoading, summary)` — a parent's setState triggered by a
+child observing external state belongs in an effect, never synchronously
+in the render body. Caught only because verification actually opened
+the detail view on a fresh launch rather than assuming the happy path;
+worth remembering alongside Phase 6/7's similar lessons about what
+seeding real data before screenshotting actually catches.
+
+**Deliberately out of scope for this phase**: no dedicated component
+tests for `Queue.tsx`/`Playlists.tsx`/`PlaylistDetail.tsx` themselves
+(matching the Phase 7 precedent of testing the underlying hooks/stores,
+not every presentational wrapper) — `queueStore`/`playlistsStore`/the
+`playbackStore` history logic all have real regression coverage, and the
+views were verified on-device with real seeded data (a scanned 4-track
+library, a 2-item queue, a 2-track playlist with a description) via
+screenshots rather than jsdom, since the two real bugs above were both
+the kind jsdom-based component tests are unlikely to have caught
+(one about a specific data-state combination, one about load-order
+timing on a fresh launch).
 
 ## Phase 0 status
 

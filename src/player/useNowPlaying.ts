@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { useLibrary } from "../context/LibraryContext";
-import { pathToFileUri, type TrackListItem } from "../lib/ipc";
+import { type TrackListItem } from "../lib/ipc";
 import { usePlaybackStore } from "../store/playbackStore";
+import { useQueueStore } from "../store/queueStore";
 
 interface NowPlaying {
   track: TrackListItem | null;
@@ -13,38 +14,36 @@ interface NowPlaying {
 
 /**
  * Resolves the playback store's bare `{ id, uri }` into the full,
- * display-ready `TrackListItem` from the library listing, and derives
- * next/previous from that same sorted list.
- *
- * There's no real queue yet (that's Phase 8) — falling back to "next/
- * previous track in the current library sort order" is a real, honest
- * behavior in the meantime rather than a non-functional placeholder
- * button; once Phase 8 lands a real queue it takes precedence here.
+ * display-ready `TrackListItem` from the library listing, and exposes
+ * real queue-/history-backed Previous/Next (Phase 8): Next plays and
+ * dequeues the persisted queue's head; Previous steps back through the
+ * in-session history stack. Neither falls back to library sort order
+ * anymore — an empty queue honestly means there's nothing next, rather
+ * than guessing at an unrelated track.
  */
 export function useNowPlaying(): NowPlaying {
   const { tracks } = useLibrary();
   const currentTrackRef = usePlaybackStore((s) => s.currentTrack);
-  const playNow = usePlaybackStore((s) => s.playNow);
+  const historyLength = usePlaybackStore((s) => s.history.length);
+  const skipToNext = usePlaybackStore((s) => s.skipToNext);
+  const playPrevious = usePlaybackStore((s) => s.playPrevious);
+  const hasQueuedNext = useQueueStore((s) => s.items.length > 0);
 
-  const index = useMemo(
-    () => (currentTrackRef ? tracks.findIndex((t) => t.id === currentTrackRef.id) : -1),
+  const track = useMemo(
+    () =>
+      currentTrackRef ? (tracks.find((t) => t.id === currentTrackRef.id) ?? null) : null,
     [tracks, currentTrackRef],
   );
 
-  const track = index >= 0 ? tracks[index] : null;
-  const nextTrack = index >= 0 ? (tracks[index + 1] ?? null) : null;
-  const previousTrack = index >= 0 ? (tracks[index - 1] ?? null) : null;
-
   return {
     track,
-    hasNext: nextTrack !== null,
-    hasPrevious: previousTrack !== null,
+    hasNext: hasQueuedNext,
+    hasPrevious: historyLength > 0,
     playNext: () => {
-      if (nextTrack) playNow({ id: nextTrack.id, uri: pathToFileUri(nextTrack.path) });
+      void skipToNext();
     },
     playPrevious: () => {
-      if (previousTrack)
-        playNow({ id: previousTrack.id, uri: pathToFileUri(previousTrack.path) });
+      void playPrevious();
     },
   };
 }

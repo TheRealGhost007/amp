@@ -30,7 +30,8 @@ export type IconName =
   | "clock"
   | "download"
   | "settings"
-  | "chevron-left";
+  | "chevron-left"
+  | "grip";
 
 const PATHS: Record<IconName, string> = {
   play: "M7 5.5v13l11-6.5-11-6.5Z",
@@ -65,6 +66,7 @@ const PATHS: Record<IconName, string> = {
   settings:
     "M4 7h3.25m3.5 0H20M4 12h9.25m3.5 0H20M4 17h5.25m3.5 0H20M7.25 7a1.75 1.75 0 1 0 3.5 0 1.75 1.75 0 0 0-3.5 0ZM13.25 12a1.75 1.75 0 1 0 3.5 0 1.75 1.75 0 0 0-3.5 0ZM9.25 17a1.75 1.75 0 1 0 3.5 0 1.75 1.75 0 0 0-3.5 0Z",
   "chevron-left": "M15 6 9 12l6 6",
+  grip: "M9 7v.01M9 12v.01M9 17v.01M15 7v.01M15 12v.01M15 17v.01",
 };
 
 interface IconProps {

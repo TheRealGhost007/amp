@@ -1,0 +1,44 @@
+.op-add-to-playlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.op-add-to-playlist__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.op-add-to-playlist__item {
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-control);
+  color: inherit;
+  text-align: left;
+  font-size: var(--text-body-sm);
+  cursor: pointer;
+}
+
+.op-add-to-playlist__item:hover {
+  background: var(--surface);
+}
+
+.op-add-to-playlist__create {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-xs);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+
+.op-add-to-playlist__create .op-field {
+  flex: 1;
+}

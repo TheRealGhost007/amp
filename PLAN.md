@@ -80,7 +80,23 @@ plan file's existence means work happened.
       Verified on-device with real playing audio and real library data;
       Zustand store confirmed as the only source of truth (neither
       component keeps its own copy of playback state).
-- [ ] **Phase 8 — Queue & Playlists**: drag-reorder, CRUD.
+- [x] **Phase 8 — Queue & Playlists**: real persisted queue
+      (`queue`/`playlist_tracks` rows keyed by their own row id, not
+      `track_id`, so a track can repeat and still be independently
+      reordered/removed) with `@dnd-kit/sortable` drag-reorder at 60fps
+      via a shared `SortableRow` component. `queueStore` keeps
+      `audio_engine::Player`'s `next` slot synced to the queue's head;
+      `playbackStore` gained a real (non-persisted) history stack for
+      Previous, retiring Phase 7's library-sort-order fallback entirely.
+      Playlist CRUD (create/rename/description/delete/add/remove/
+      reorder tracks) with a new `ConfirmDialog` gating deletion.
+      Library rows gained a "..." actions menu (Play Next/Add to Queue/
+      Add to Playlist) reusing Phase 1's `Menu`/`Popover`. Verified
+      on-device with a real scanned 4-track library, seeded queue, and
+      seeded playlist; caught and fixed two real bugs only visible this
+      way (Queue's empty-state gating condition; a render-time parent
+      setState call racing playlistsStore's initial load) — see
+      ARCHITECTURE.md.
 - [ ] **Phase 9 — Command Palette & Context Menus**.
 - [ ] **Phase 10 — Metadata Editor & Artwork Editing**.
 - [ ] **Phase 11 — Linux/Omarchy Integration**: MPRIS, media keys,

@@ -47,6 +47,19 @@ impl Database {
         Ok(())
     }
 
+    pub fn set_playlist_description(
+        &self,
+        id: i64,
+        description: Option<&str>,
+        now: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE playlists SET description = ?1, updated_at = ?2 WHERE id = ?3",
+            params![description, now, id],
+        )?;
+        Ok(())
+    }
+
     pub fn delete_playlist(&self, id: i64) -> Result<()> {
         self.conn
             .execute("DELETE FROM playlists WHERE id = ?1", params![id])?;

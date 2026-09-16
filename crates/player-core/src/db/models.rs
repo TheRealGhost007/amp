@@ -124,3 +124,30 @@ pub struct QueueItem {
     pub track_id: i64,
     pub position: i64,
 }
+
+/// One queue row joined with its track's display-ready fields — `id` is
+/// the queue row's own identity (what `reorder_queue`/`remove_queue_item`
+/// key off), not the track's.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct QueueTrackItem {
+    pub id: i64,
+    pub track: TrackListItem,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PlaylistSummary {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub track_count: i64,
+}
+
+/// One playlist-track row joined with its track's display-ready fields —
+/// `id` is the `playlist_tracks` row's own identity, not the track's (see
+/// `Database::reorder_playlist`'s doc comment for why that distinction
+/// matters).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PlaylistTrackItem {
+    pub id: i64,
+    pub track: TrackListItem,
+}

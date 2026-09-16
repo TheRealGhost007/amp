@@ -1,6 +1,7 @@
-import { ButtonHTMLAttributes, ReactNode } from "react";
+import { ButtonHTMLAttributes, ReactNode, useRef, useState } from "react";
 import { Artwork } from "../Artwork/Artwork";
 import { Icon } from "../Icon/Icon";
+import { Menu, type MenuItemSpec } from "../Menu/Menu";
 import "./MediaRow.css";
 
 interface MediaRowProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -12,6 +13,9 @@ interface MediaRowProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   active?: boolean;
   favorite?: boolean;
   onToggleFavorite?: () => void;
+  /** Contextual actions ("Play Next", "Add to Queue", ...) shown behind
+   * a "..." trigger — omit to render the row with no menu at all. */
+  actions?: MenuItemSpec[];
 }
 
 /** The one shared row component for songs/albums/artists/playlists in
@@ -26,9 +30,13 @@ export function MediaRow({
   active = false,
   favorite,
   onToggleFavorite,
+  actions,
   className,
   ...rest
 }: MediaRowProps) {
+  const menuAnchorRef = useRef<HTMLSpanElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <button
       className={["op-media-row", active && "op-media-row--active", className]
@@ -64,6 +72,37 @@ export function MediaRow({
         </span>
       )}
       {trailing && <span className="op-media-row__trailing">{trailing}</span>}
+      {actions && actions.length > 0 && (
+        <>
+          <span
+            ref={menuAnchorRef}
+            role="button"
+            tabIndex={0}
+            className="op-media-row__menu-trigger"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((open) => !open);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen((open) => !open);
+              }
+            }}
+          >
+            <Icon name="dots" size={16} />
+          </span>
+          <Menu
+            anchorRef={menuAnchorRef}
+            open={menuOpen}
+            onClose={() => setMenuOpen(false)}
+            items={actions}
+          />
+        </>
+      )}
     </button>
   );
 }

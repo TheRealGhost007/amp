@@ -1,0 +1,11 @@
+.op-playlists__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-md);
+}
+
+.op-playlists__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+}

@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ToastProvider } from "../components";
 import type { TrackListItem } from "../lib/ipc";
 
 const searchMock = vi.fn();
@@ -31,7 +32,20 @@ vi.mock("../lib/ipc", () => ({
   library: {
     search: (...args: unknown[]) => searchMock(...args),
   },
+  playlists: {
+    addTrack: vi.fn(),
+  },
   pathToFileUri: (path: string) => `file://${path}`,
+}));
+
+vi.mock("../store/queueStore", () => ({
+  useQueueStore: (selector: (s: unknown) => unknown) =>
+    selector({ addToQueue: vi.fn(), playNext: vi.fn() }),
+}));
+
+vi.mock("../store/playlistsStore", () => ({
+  usePlaylistsStore: (selector: (s: unknown) => unknown) =>
+    selector({ items: [], create: vi.fn() }),
 }));
 
 vi.mock("../context/LibraryContext", () => ({
@@ -110,7 +124,11 @@ describe("Library search", () => {
     );
 
     const user = userEvent.setup();
-    render(<Library />);
+    render(
+      <ToastProvider>
+        <Library />
+      </ToastProvider>,
+    );
 
     const input = screen.getByPlaceholderText("Search your library…");
     await user.type(input, "cat");

@@ -73,3 +73,27 @@
   font-size: var(--text-caption);
   font-family: var(--font-numeric);
 }
+
+.op-media-row__menu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-control);
+  color: var(--fg-dim);
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+
+.op-media-row:hover .op-media-row__menu-trigger,
+.op-media-row__menu-trigger:focus-visible {
+  opacity: 1;
+}
+
+.op-media-row__menu-trigger:hover {
+  background: var(--bg-dim);
+}

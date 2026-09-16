@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { TrackListItem, TrackRef } from "../lib/ipc";
+import type { QueueTrackItem, TrackListItem, TrackRef } from "../lib/ipc";
 import { useNowPlaying } from "./useNowPlaying";
 
 const mockUseLibrary = vi.fn();
@@ -8,11 +8,24 @@ vi.mock("../context/LibraryContext", () => ({
   useLibrary: () => mockUseLibrary(),
 }));
 
-const mockPlayNow = vi.fn();
+const mockSkipToNext = vi.fn();
+const mockPlayPrevious = vi.fn();
 let mockCurrentTrack: TrackRef | null = null;
+let mockHistoryLength = 0;
 vi.mock("../store/playbackStore", () => ({
   usePlaybackStore: (selector: (s: unknown) => unknown) =>
-    selector({ currentTrack: mockCurrentTrack, playNow: mockPlayNow }),
+    selector({
+      currentTrack: mockCurrentTrack,
+      history: { length: mockHistoryLength },
+      skipToNext: mockSkipToNext,
+      playPrevious: mockPlayPrevious,
+    }),
+}));
+
+let mockQueueItems: QueueTrackItem[] = [];
+vi.mock("../store/queueStore", () => ({
+  useQueueStore: (selector: (s: unknown) => unknown) =>
+    selector({ items: mockQueueItems }),
 }));
 
 function track(id: number, path: string): TrackListItem {
@@ -36,8 +49,11 @@ const tracks = [track(1, "/a.flac"), track(2, "/b.flac"), track(3, "/c.flac")];
 
 describe("useNowPlaying", () => {
   beforeEach(() => {
-    mockPlayNow.mockReset();
+    mockSkipToNext.mockReset();
+    mockPlayPrevious.mockReset();
     mockCurrentTrack = null;
+    mockHistoryLength = 0;
+    mockQueueItems = [];
     mockUseLibrary.mockReturnValue({ tracks });
   });
 
@@ -49,25 +65,12 @@ describe("useNowPlaying", () => {
     expect(result.current.hasPrevious).toBe(false);
   });
 
-  it("finds the current track and both neighbors from the middle of the list", () => {
+  it("resolves the current track's full display info from the library", () => {
     mockCurrentTrack = { id: 2, uri: "file:///b.flac" };
     const { result } = renderHook(() => useNowPlaying());
 
     expect(result.current.track?.id).toBe(2);
-    expect(result.current.hasNext).toBe(true);
-    expect(result.current.hasPrevious).toBe(true);
-  });
-
-  it("has no previous at the start of the list and no next at the end", () => {
-    mockCurrentTrack = { id: 1, uri: "file:///a.flac" };
-    const { result: first } = renderHook(() => useNowPlaying());
-    expect(first.current.hasPrevious).toBe(false);
-    expect(first.current.hasNext).toBe(true);
-
-    mockCurrentTrack = { id: 3, uri: "file:///c.flac" };
-    const { result: last } = renderHook(() => useNowPlaying());
-    expect(last.current.hasPrevious).toBe(true);
-    expect(last.current.hasNext).toBe(false);
+    expect(result.current.track?.title).toBe("Track 2");
   });
 
   it("treats a track no longer in the library as nothing playing", () => {
@@ -75,18 +78,36 @@ describe("useNowPlaying", () => {
     const { result } = renderHook(() => useNowPlaying());
 
     expect(result.current.track).toBeNull();
-    expect(result.current.hasNext).toBe(false);
-    expect(result.current.hasPrevious).toBe(false);
   });
 
-  it("playNext/playPrevious call playNow with the neighboring track's file URI", () => {
-    mockCurrentTrack = { id: 2, uri: "file:///b.flac" };
+  it("hasNext reflects the persisted queue, not library sort order", () => {
+    mockCurrentTrack = { id: 1, uri: "file:///a.flac" };
+    const { result: empty } = renderHook(() => useNowPlaying());
+    expect(empty.current.hasNext).toBe(false);
+
+    mockQueueItems = [{ id: 10, track: track(2, "/b.flac") }];
+    const { result: withQueue } = renderHook(() => useNowPlaying());
+    expect(withQueue.current.hasNext).toBe(true);
+  });
+
+  it("hasPrevious reflects the history stack length", () => {
+    const { result: empty } = renderHook(() => useNowPlaying());
+    expect(empty.current.hasPrevious).toBe(false);
+
+    mockHistoryLength = 2;
+    const { result: withHistory } = renderHook(() => useNowPlaying());
+    expect(withHistory.current.hasPrevious).toBe(true);
+  });
+
+  it("playNext/playPrevious delegate to the store's skipToNext/playPrevious actions", () => {
+    mockQueueItems = [{ id: 10, track: track(2, "/b.flac") }];
+    mockHistoryLength = 1;
     const { result } = renderHook(() => useNowPlaying());
 
     result.current.playNext();
-    expect(mockPlayNow).toHaveBeenCalledWith({ id: 3, uri: "file:///c.flac" });
+    expect(mockSkipToNext).toHaveBeenCalledOnce();
 
     result.current.playPrevious();
-    expect(mockPlayNow).toHaveBeenCalledWith({ id: 1, uri: "file:///a.flac" });
+    expect(mockPlayPrevious).toHaveBeenCalledOnce();
   });
 });

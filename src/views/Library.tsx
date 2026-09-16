@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Button, EmptyState, Input, MediaRow } from "../components";
+import {
+  AddToPlaylistDialog,
+  Button,
+  EmptyState,
+  Input,
+  MediaRow,
+  useToast,
+} from "../components";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlaybackStore } from "../store/playbackStore";
+import { useQueueStore } from "../store/queueStore";
 import { library, pathToFileUri, type TrackListItem } from "../lib/ipc";
 import { formatDuration } from "../lib/format";
 import { ViewHeader } from "./ViewHeader";
@@ -16,10 +24,14 @@ export function Library() {
   const { tracks, loading, addFolder } = useLibrary();
   const playNow = usePlaybackStore((s) => s.playNow);
   const currentTrackId = usePlaybackStore((s) => s.currentTrack?.id);
+  const addToQueue = useQueueStore((s) => s.addToQueue);
+  const queuePlayNext = useQueueStore((s) => s.playNext);
+  const { show: showToast } = useToast();
 
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TrackListItem[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [addToPlaylistTrackId, setAddToPlaylistTrackId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -140,6 +152,30 @@ export function Library() {
                     trailing={formatDuration(track.duration_ms)}
                     active={track.id === currentTrackId}
                     onClick={() => handlePlay(track)}
+                    actions={[
+                      {
+                        id: "play-next",
+                        label: "Play Next",
+                        onSelect: () => {
+                          void queuePlayNext(track.id);
+                          showToast(`"${track.title}" will play next`, "success");
+                        },
+                      },
+                      {
+                        id: "add-to-queue",
+                        label: "Add to Queue",
+                        onSelect: () => {
+                          void addToQueue(track.id);
+                          showToast(`Added "${track.title}" to queue`, "success");
+                        },
+                      },
+                      {
+                        id: "add-to-playlist",
+                        label: "Add to Playlist…",
+                        separatorBefore: true,
+                        onSelect: () => setAddToPlaylistTrackId(track.id),
+                      },
+                    ]}
                   />
                 </div>
               );
@@ -147,6 +183,12 @@ export function Library() {
           </div>
         </div>
       )}
+
+      <AddToPlaylistDialog
+        open={addToPlaylistTrackId !== null}
+        trackId={addToPlaylistTrackId}
+        onClose={() => setAddToPlaylistTrackId(null)}
+      />
     </div>
   );
 }

@@ -96,6 +96,21 @@ pub fn run() {
             commands::favorites::favorites_is_favorite,
             commands::favorites::favorites_toggle,
             commands::favorites::favorites_list_ids,
+            commands::queue::queue_list,
+            commands::queue::queue_add,
+            commands::queue::queue_play_next,
+            commands::queue::queue_remove,
+            commands::queue::queue_reorder,
+            commands::queue::queue_clear,
+            commands::playlists::playlists_list,
+            commands::playlists::playlists_create,
+            commands::playlists::playlists_rename,
+            commands::playlists::playlists_set_description,
+            commands::playlists::playlists_delete,
+            commands::playlists::playlists_list_tracks,
+            commands::playlists::playlists_add_track,
+            commands::playlists::playlists_remove_track,
+            commands::playlists::playlists_reorder_tracks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

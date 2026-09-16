@@ -5,7 +5,9 @@
 //! once is cheap; re-fetching per scroll position or per sort change
 //! would not be.
 
-use super::models::{AlbumSummary, ArtistSummary, TrackListItem};
+use super::models::{
+    AlbumSummary, ArtistSummary, PlaylistSummary, PlaylistTrackItem, QueueTrackItem, TrackListItem,
+};
 use super::Database;
 use crate::error::Result;
 use std::collections::HashMap;
@@ -111,20 +113,101 @@ impl Database {
             .collect())
     }
 
+    /// The queue, joined to display-ready track fields, in position
+    /// order — `id` in each item is the `queue` row's own identity.
+    pub fn list_queue_for_browse(&self) -> Result<Vec<QueueTrackItem>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT q.id, {TRACK_LIST_ITEM_COLUMNS}
+             FROM queue q
+             JOIN tracks t ON t.id = q.track_id
+             LEFT JOIN artists ar ON ar.id = t.artist_id
+             LEFT JOIN albums al ON al.id = t.album_id
+             LEFT JOIN genres g ON g.id = t.genre_id
+             ORDER BY q.position ASC"
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok(QueueTrackItem {
+                id: row.get(0)?,
+                track: Self::row_to_track_list_item_offset(row, 1)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    /// Every playlist with its track count, newest-updated first.
+    pub fn list_playlists_for_browse(&self) -> Result<Vec<PlaylistSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.name, p.description, COUNT(pt.id)
+             FROM playlists p
+             LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+             GROUP BY p.id
+             ORDER BY p.updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(PlaylistSummary {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                track_count: row.get(3)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    /// One playlist's tracks, joined to display-ready fields, in position
+    /// order — `id` in each item is the `playlist_tracks` row's own
+    /// identity.
+    pub fn list_playlist_tracks_for_browse(
+        &self,
+        playlist_id: i64,
+    ) -> Result<Vec<PlaylistTrackItem>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT pt.id, {TRACK_LIST_ITEM_COLUMNS}
+             FROM playlist_tracks pt
+             JOIN tracks t ON t.id = pt.track_id
+             LEFT JOIN artists ar ON ar.id = t.artist_id
+             LEFT JOIN albums al ON al.id = t.album_id
+             LEFT JOIN genres g ON g.id = t.genre_id
+             WHERE pt.playlist_id = ?1
+             ORDER BY pt.position ASC"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![playlist_id], |row| {
+            Ok(PlaylistTrackItem {
+                id: row.get(0)?,
+                track: Self::row_to_track_list_item_offset(row, 1)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
     fn row_to_track_list_item(row: &rusqlite::Row) -> rusqlite::Result<TrackListItem> {
+        Self::row_to_track_list_item_offset(row, 0)
+    }
+
+    /// Same as `row_to_track_list_item`, but the `TRACK_LIST_ITEM_COLUMNS`
+    /// block starts at column `offset` instead of 0 — used when a query
+    /// selects an extra leading column (e.g. a `queue`/`playlist_tracks`
+    /// row id) ahead of the track columns.
+    fn row_to_track_list_item_offset(
+        row: &rusqlite::Row,
+        offset: usize,
+    ) -> rusqlite::Result<TrackListItem> {
         Ok(TrackListItem {
-            id: row.get(0)?,
-            path: row.get(1)?,
-            title: row.get(2)?,
-            artist_name: row.get(3)?,
-            album_title: row.get(4)?,
-            genre_name: row.get(5)?,
-            track_number: row.get(6)?,
-            disc_number: row.get(7)?,
-            duration_ms: row.get(8)?,
-            year: row.get(9)?,
-            has_embedded_art: row.get(10)?,
-            added_at: row.get(11)?,
+            id: row.get(offset)?,
+            path: row.get(offset + 1)?,
+            title: row.get(offset + 2)?,
+            artist_name: row.get(offset + 3)?,
+            album_title: row.get(offset + 4)?,
+            genre_name: row.get(offset + 5)?,
+            track_number: row.get(offset + 6)?,
+            disc_number: row.get(offset + 7)?,
+            duration_ms: row.get(offset + 8)?,
+            year: row.get(offset + 9)?,
+            has_embedded_art: row.get(offset + 10)?,
+            added_at: row.get(offset + 11)?,
         })
     }
 }
@@ -226,5 +309,58 @@ mod tests {
             .search_tracks_for_browse("zzz-nonexistent", 10)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn list_queue_for_browse_joins_track_fields_in_position_order() {
+        let db = Database::open_in_memory().unwrap();
+        let a = insert_full_track(&db, "/a.flac", "Aardvark", "Daft Punk", "Discovery");
+        let b = insert_full_track(&db, "/b.flac", "Zebra", "Daft Punk", "Discovery");
+
+        let row_b = db.add_to_queue(b).unwrap();
+        let row_a = db.add_to_queue(a).unwrap();
+
+        let items = db.list_queue_for_browse().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, row_b);
+        assert_eq!(items[0].track.title, "Zebra");
+        assert_eq!(items[0].track.artist_name, Some("Daft Punk".to_string()));
+        assert_eq!(items[1].id, row_a);
+        assert_eq!(items[1].track.title, "Aardvark");
+    }
+
+    #[test]
+    fn list_playlists_for_browse_counts_tracks_and_carries_description() {
+        let db = Database::open_in_memory().unwrap();
+        let playlist = db.create_playlist("Road Trip", 100).unwrap();
+        db.rename_playlist(playlist.id, "Road Trip", 100).unwrap();
+        db.set_playlist_description(playlist.id, Some("Summer 2026"), 200)
+            .unwrap();
+        let a = insert_full_track(&db, "/a.flac", "One", "Daft Punk", "Discovery");
+        db.add_track_to_playlist(playlist.id, a).unwrap();
+
+        let playlists = db.list_playlists_for_browse().unwrap();
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(playlists[0].name, "Road Trip");
+        assert_eq!(playlists[0].description, Some("Summer 2026".to_string()));
+        assert_eq!(playlists[0].track_count, 1);
+    }
+
+    #[test]
+    fn list_playlist_tracks_for_browse_joins_track_fields_in_position_order() {
+        let db = Database::open_in_memory().unwrap();
+        let playlist = db.create_playlist("Mix", 0).unwrap();
+        let a = insert_full_track(&db, "/a.flac", "Aardvark", "Daft Punk", "Discovery");
+        let b = insert_full_track(&db, "/b.flac", "Zebra", "Daft Punk", "Discovery");
+
+        let row_a = db.add_track_to_playlist(playlist.id, a).unwrap();
+        let row_b = db.add_track_to_playlist(playlist.id, b).unwrap();
+
+        let items = db.list_playlist_tracks_for_browse(playlist.id).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, row_a);
+        assert_eq!(items[0].track.title, "Aardvark");
+        assert_eq!(items[1].id, row_b);
+        assert_eq!(items[1].track.title, "Zebra");
     }
 }
