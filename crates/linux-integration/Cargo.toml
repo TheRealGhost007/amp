@@ -11,3 +11,7 @@ thiserror.workspace = true
 tracing.workspace = true
 player-core.workspace = true
 audio-engine.workspace = true
+mpris-server = { version = "0.10.0", features = ["tokio"] }
+notify-rust = "4.18.0"
+url = "2.5.8"
+tokio = { workspace = true, features = ["rt", "sync"] }

@@ -5,6 +5,8 @@
 //! `audio-engine` state directly so it can be exercised without a window.
 
 pub mod error;
+pub mod mpris;
+pub mod notifications;
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")

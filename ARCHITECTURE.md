@@ -1057,6 +1057,145 @@ library rejection fires for real, with neither the file nor the DB
 touched, and the exact `PATH_OUTSIDE_LIBRARY` message surfaced as an
 error toast.
 
+## Phase 11: Linux/Omarchy integration (MPRIS, media keys, notifications)
+
+**"Media-key capture" turned out to need no capture code at all.**
+Investigated Omarchy's actual media-key handling before writing anything:
+Hyprland's default keybinds (`/usr/share/omarchy/default/hypr/bindings/media.lua`)
+route `XF86Audio{Play,Pause,Next,Prev}` through `omarchy-shell media
+<action>`, which forwards to Quickshell's built-in `Quickshell.Services.Mpris`
+module — Omarchy's shell already discovers and controls *any* MPRIS
+player on the session bus. A Wayland client can't grab global hotkeys
+directly anyway (no compositor protocol for it here), and this
+confirms the whole app doesn't need to — implementing MPRIS correctly
+*is* "media key capture" for this desktop. Verified for real: once the
+service was running, Quickshell's own top-bar media widget picked it
+up and displayed/controlled it with zero app-side key-binding code.
+
+**MPRIS via `mpris-server`'s `Send`-safe `Server`/`RootInterface`/
+`PlayerInterface` traits, backed by `Arc<Mutex<...>>`, running on
+`src-tauri`'s existing `tauri::async_runtime` — not the crate's
+`!Send`, `Rc`-based `Player` convenience type.** This was a deliberate
+architecture change made *during* this phase after hitting a real,
+fully-reproduced bug with the original design (see below); it is not
+how the phase started. `MprisHandle::update(snapshot)` diffs against
+cached values and only calls `Server::properties_changed` for fields
+that actually changed, avoiding D-Bus chatter on every 200ms tick;
+`Position` is deliberately *not* one of those fields (MPRIS spec:
+clients poll it, no `PropertiesChanged` signal) — it's a plain
+`Mutex`-guarded field read directly by the `position()` getter.
+`Next`/`Previous` are forwarded to the frontend as a `mpris-transport`
+Tauri event rather than handled in Rust at all, since the actual
+queue/play-history they need lives only in `queueStore`/
+`playbackStore.history` (Zustand) — `audio_engine::Player` has no
+concept of a queue, only a single look-ahead slot, and neither crate
+should grow one just for this. Play/Pause/Stop/Seek/SetVolume act
+directly on the same `Player` every other command path uses, and go
+through a new shared `emit_player_events` helper so an MPRIS-initiated
+change reaches the frontend's own UI (mini-player, Quickshell's widget)
+immediately via the existing `player-event` channel — without it, a
+`playerctl pause` would pause real audio while the in-app UI kept
+showing a playing state until the next natural event, breaking Phase
+7's "one source of truth" invariant for exactly this new input source.
+
+**A real, fully-reproduced bug drove a mid-phase architecture change:**
+the first implementation used `mpris-server`'s ready-made `Player`
+(`!Send`, `Rc`-based), which requires its own dedicated OS thread
+running a single-threaded Tokio runtime + `LocalSet` (it can't share a
+multi-threaded runtime). This worked perfectly in isolation — a
+standalone repro with the exact same thread/channel/diff-check
+structure passed cleanly — but broke *silently* the moment a real
+`playbin3`/`pipewiresink` pipeline in the same process reached the
+`Playing` state: `apply_snapshot`'s own same-task readback confirmed
+`player.set_playback_status()`/`set_metadata()` succeeded every single
+tick, yet `busctl get-property`/`playerctl` from *outside* the process
+kept reading the stale initial values (`Stopped`, empty metadata)
+indefinitely, with zero errors logged anywhere. Root-caused via a
+sequence of minimal standalone reproductions (not guesswork): the
+bug did *not* reproduce with `gstreamer::init()` alone, nor with a
+`GstreamerBackend` merely constructed, nor with a loaded-and-paused
+(prerolled but not streaming) pipeline — only an *actively streaming*
+`play_now()` reproduced it, isolating the trigger precisely to "a real
+GStreamer audio pipeline streaming in the same process as the
+dedicated MPRIS thread's manually-polled `LocalSet`." Rather than work
+around a not-fully-understood interaction between two separate
+runtimes/threads sharing a process with an active real-time audio
+pipeline, the fix was to remove the failure-prone mechanism entirely:
+`mpris-server` also exposes `Send + Sync`-bound `RootInterface`/
+`PlayerInterface` traits usable with the plain `Server` type, which
+needs no dedicated thread, no `LocalSet`, and no manual polling loop —
+zbus drives it via the same connection-owned executor task any other
+zbus interface uses, identical to how the rest of this app's D-Bus-free
+code already coexists with GStreamer without issue. Verified the fix
+by reproducing the exact broken scenario again (real playback, `busctl`
+polling mid-stream) and confirming `PlaybackStatus`/`Metadata`/
+`Position`/`CanGoNext` all now update correctly, live, throughout
+playback — plus a full playerctl-equivalent control loop (`Play`,
+`Pause`, `Seek` including the past-end-of-track edge case correctly
+falling through to natural EOS) and a real track-change notification
+carrying a genuine resolved artwork path, all captured via
+`dbus-monitor` and `busctl` rather than assumed from log output alone.
+
+**Artwork path resolution needed a new read-side function, not just
+Phase 3's write side.** `player_core::track_artwork_path(cache_dir,
+&track)` recomputes the same `track-<hash>` cache key
+`scan::process_file` already writes under and globs the artwork cache
+directory for a matching file of any extension — the extension itself
+was never stored anywhere queryable, only baked into the cached
+filename, so a glob-by-stem is simpler and more robust than trying to
+also persist/track the extension. Used by both MPRIS's metadata and
+the track-change notification's icon, sharing one lookup rather than
+two.
+
+**`NowPlayingTracker`** (`src-tauri/src/mpris.rs`) caches the current
+track's display fields (title/artist/album/artwork) so the 200ms tick
+loop only hits the database when the track id actually changes, not
+every tick; `refresh_if_changed` returns `true` only on a genuine
+`None`/`Some(other)` → `Some(new)` transition, since a `Some → None`
+(playback stopped) is a real state change worth clearing the cache for
+but not one worth a "now playing" notification. This is `src-tauri`'s
+first-ever unit-tested module — deliberately: unlike the rest of this
+layer's "thin pass-through" commands, this dedup/caching logic has real
+branching behavior worth verifying directly (an in-memory `Database` +
+inserted fake tracks, no D-Bus/GStreamer needed).
+
+**Desktop notifications via `notify-rust`**, gated by a new
+`notifications.track_change_enabled` setting (default on, added to
+Settings > Notifications with a new `Toggle` component — the app's
+first boolean settings control, following the same `settings.get/set`
+key-value pattern as the existing theme dropdown). `Notification::icon()`
+accepts either a themed icon name or an absolute file path per its own
+docs, so the resolved artwork path (or a generic `audio-x-generic`
+fallback) is passed directly — no need for the heavier `image()`/
+`Hint::ImageData` API. Fired from the same tick-loop choke point that
+builds the MPRIS snapshot, exactly once per genuine track change,
+regardless of what caused it.
+
+**PipeWire device list feeding the device switcher**: already real as
+of Phase 4 (`GstreamerBackend::enumerate_output_devices` uses
+GStreamer's own `DeviceMonitor` against `Audio/Sink`, backed by the
+PipeWire GStreamer plugin) — this phase only needed to confirm it,
+which it did (device enumeration still returns the real system sink
+during this phase's testing); this environment has only one audio
+output device available, so the specific "switching between two real
+devices doesn't interrupt playback" check — like the spec's own
+"if available" phrasing acknowledges — couldn't be exercised live and
+is deferred to whenever a second device is on hand.
+
+**Verified fully on-device**, end to end, not from logs or assumptions:
+scanned two real tagged fixtures (one with embedded artwork) into the
+live app's database, force-played one via a temporary store-default
+hardcode (reverted before commit), and confirmed via `busctl`/
+`dbus-monitor` — separate processes from the app itself, exactly like a
+real MPRIS client — that: the service registers as
+`org.mpris.MediaPlayer2.amp`; `PlaybackStatus`/`Metadata` (including
+`mpris:artUrl`)/`Position`/`CanGoNext` all track real playback live;
+`Play`/`Pause`/`Seek` D-Bus calls actually control the real audio
+pipeline; a seek past a track's end correctly falls through to the
+existing natural-EOS handling; and a `Notify` D-Bus call fires with the
+correct title/subtitle/icon on every track change, including a real
+resolved artwork file path for the embedded-art fixture.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

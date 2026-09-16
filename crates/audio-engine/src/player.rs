@@ -159,6 +159,10 @@ impl<B: Backend> Player<B> {
         Ok(())
     }
 
+    pub fn volume(&self) -> f64 {
+        self.volume
+    }
+
     pub fn set_volume(&mut self, volume: f64) -> Result<()> {
         self.volume = volume.clamp(0.0, 1.0);
         if self.crossfade.is_none() {
@@ -517,6 +521,15 @@ mod tests {
         assert!(!events.contains(&PlayerEvent::PlaybackFinished));
         assert_eq!(player.current_track(), Some(&track(2, "b")));
         assert_eq!(player.active, Slot::A);
+    }
+
+    #[test]
+    fn volume_getter_reflects_the_clamped_value() {
+        let mut player = Player::new(SimulatedBackend::new());
+        player.set_volume(1.5).unwrap();
+        assert_eq!(player.volume(), 1.0);
+        player.set_volume(-0.5).unwrap();
+        assert_eq!(player.volume(), 0.0);
     }
 
     #[test]

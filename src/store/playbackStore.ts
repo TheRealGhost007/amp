@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   favorites,
   history,
+  onMprisTransport,
   onPlayerEvent,
   onPlayerPosition,
   pathToFileUri,
@@ -196,9 +197,15 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => {
         }
       });
 
+      const unlistenMprisTransport = await onMprisTransport((command) => {
+        if (command === "Next") void get().skipToNext();
+        else void get().playPrevious();
+      });
+
       return () => {
         unlistenPosition();
         unlistenEvent();
+        unlistenMprisTransport();
       };
     },
 

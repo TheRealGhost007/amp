@@ -11,6 +11,7 @@ export { Popover } from "./Popover/Popover";
 export { Menu } from "./Menu/Menu";
 export type { MenuItemSpec } from "./Menu/Menu";
 export { Dropdown } from "./Dropdown/Dropdown";
+export { Toggle } from "./Toggle/Toggle";
 export { Dialog } from "./Dialog/Dialog";
 export { ConfirmDialog } from "./ConfirmDialog/ConfirmDialog";
 export { ToastProvider, useToast } from "./Toast/Toast";

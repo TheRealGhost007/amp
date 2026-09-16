@@ -69,6 +69,14 @@ pub fn player_seek(state: State<AppState>, position_ms: u64) -> AppResult<()> {
     let mut guard = state.player.lock().unwrap();
     let player = guard.as_mut().ok_or_else(unavailable)?;
     player.seek(position_ms)?;
+    drop(guard);
+    // Any seek — not just one MPRIS itself requested — should emit
+    // MPRIS's `Seeked` signal, or an external client (a lock-screen
+    // scrubber, another MPRIS-aware widget) watching this player would
+    // silently desync from a seek made through the app's own UI.
+    if let Some(mpris) = &state.mpris {
+        mpris.notify_seeked(position_ms);
+    }
     Ok(())
 }
 

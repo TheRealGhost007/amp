@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const playNowMock = vi.fn();
 const isFavoriteMock = vi.fn();
+let mprisTransportHandler: ((command: "Next" | "Previous") => void) | null = null;
 
 vi.mock("../lib/ipc", () => ({
   player: {
@@ -26,15 +27,27 @@ vi.mock("../lib/ipc", () => ({
   history: {
     recordPlayed: vi.fn().mockResolvedValue(undefined),
   },
+  pathToFileUri: (path: string) => `file://${path}`,
   onPlayerEvent: vi.fn().mockResolvedValue(() => {}),
   onPlayerPosition: vi.fn().mockResolvedValue(() => {}),
+  onMprisTransport: vi.fn((handler: (command: "Next" | "Previous") => void) => {
+    mprisTransportHandler = handler;
+    return Promise.resolve(() => {});
+  }),
 }));
 
 // playbackStore's playTrack re-arms the backend's `next` from the queue
 // after every playNow/playPrevious — irrelevant to the race-guard
-// behavior these tests exercise, so stubbed out entirely.
+// behavior these tests exercise, so stubbed out entirely. `items`
+// defaults empty; the MPRIS-transport describe block below overrides it
+// via `useQueueStore.getState().items` reassignment where it matters.
+const mockQueueState = {
+  items: [] as { id: number; track: { id: number; path: string } }[],
+  syncNext: vi.fn(),
+  consumeHead: vi.fn(),
+};
 vi.mock("./queueStore", () => ({
-  useQueueStore: { getState: () => ({ syncNext: vi.fn(), consumeHead: vi.fn() }) },
+  useQueueStore: { getState: () => mockQueueState },
 }));
 
 const { usePlaybackStore } = await import("./playbackStore");
@@ -142,5 +155,46 @@ describe("playbackStore history / playPrevious", () => {
     await usePlaybackStore.getState().playPrevious();
     expect(playNowMock).not.toHaveBeenCalled();
     expect(usePlaybackStore.getState().currentTrack).toBeNull();
+  });
+});
+
+describe("playbackStore.init MPRIS transport routing", () => {
+  const trackA = { id: 1, uri: "file:///a.flac" };
+  const trackB = { id: 2, uri: "file:///b.flac" };
+
+  beforeEach(() => {
+    playNowMock.mockReset().mockResolvedValue(undefined);
+    isFavoriteMock.mockReset().mockResolvedValue(false);
+    mprisTransportHandler = null;
+    mockQueueState.items = [];
+    usePlaybackStore.setState({
+      currentTrack: null,
+      isPlaying: false,
+      isFavorite: false,
+      history: [],
+    });
+  });
+
+  it("routes an MPRIS Next command to skipToNext, since the queue it needs lives only in this frontend", async () => {
+    mockQueueState.items = [{ id: 10, track: { id: 5, path: "/music/next.flac" } }];
+    await usePlaybackStore.getState().init();
+
+    mprisTransportHandler?.("Next");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(playNowMock).toHaveBeenCalledWith({ id: 5, uri: "file:///music/next.flac" });
+  });
+
+  it("routes an MPRIS Previous command to playPrevious, walking this frontend's own history stack", async () => {
+    await usePlaybackStore.getState().playNow(trackA);
+    await usePlaybackStore.getState().playNow(trackB);
+    await usePlaybackStore.getState().init();
+
+    mprisTransportHandler?.("Previous");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(usePlaybackStore.getState().currentTrack).toEqual(trackA);
   });
 });

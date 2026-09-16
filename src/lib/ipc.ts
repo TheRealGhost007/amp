@@ -235,3 +235,16 @@ export function onPlayerPosition(
 ): Promise<UnlistenFn> {
   return listen<PlayerPosition>("player-position", (e) => handler(e.payload));
 }
+
+export type MprisTransportCommand = "Next" | "Previous";
+
+/** MPRIS's `Next`/`Previous` (from `playerctl`, media keys via Omarchy's
+ * Quickshell media widget, a lock-screen widget, ...) arrive as this
+ * event rather than acting directly on `audio_engine::Player` — the
+ * queue/play-history they need to act on lives only in this frontend's
+ * Zustand stores (`queueStore`/`playbackStore.history`), not in Rust. */
+export function onMprisTransport(
+  handler: (command: MprisTransportCommand) => void,
+): Promise<UnlistenFn> {
+  return listen<MprisTransportCommand>("mpris-transport", (e) => handler(e.payload));
+}

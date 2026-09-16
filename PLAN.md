@@ -139,8 +139,30 @@ plan file's existence means work happened.
       immediately, and removing the file's scan root and retrying
       produced the exact path-outside-library rejection with nothing
       written. See ARCHITECTURE.md.
-- [ ] **Phase 11 — Linux/Omarchy Integration**: MPRIS, media keys,
-      notifications, PipeWire device switching.
+- [x] **Phase 11 — Linux/Omarchy Integration**: MPRIS via `mpris-server`'s
+      `Send`-safe `Server`/`RootInterface`/`PlayerInterface` traits
+      (backed by `Arc<Mutex<...>>`, running on the app's existing async
+      runtime); desktop track-change notifications via `notify-rust`,
+      gated by a new Settings toggle; PipeWire device list confirmed
+      already real from Phase 4. "Media-key capture" needed no code —
+      Omarchy's Hyprland keybinds already route XF86Audio* keys through
+      Quickshell's built-in MPRIS client, so implementing MPRIS
+      correctly *is* the media-key story on this desktop (confirmed:
+      Quickshell's own media widget picked up the service natively).
+      Mid-phase architecture change after a real, fully-reproduced bug:
+      the first implementation used `mpris-server`'s `!Send`, `Rc`-based
+      `Player` on a dedicated thread, which silently stopped reflecting
+      state to external D-Bus queries the moment a real GStreamer
+      pipeline in the same process started actively streaming (root-
+      caused via a series of minimal standalone reproductions, not
+      guesswork) — switched to the `Send`-safe interface traits, which
+      need no dedicated thread and don't exhibit the problem. Verified
+      fully on-device via `busctl`/`dbus-monitor` (not logs): live
+      PlaybackStatus/Metadata/Position/CanGoNext during real playback,
+      working Play/Pause/Seek control, a seek past track-end correctly
+      falling through to natural EOS, and a real `Notify` call with
+      correct title/subtitle and a genuine resolved artwork path. See
+      ARCHITECTURE.md.
 - [ ] **Phase 12 — Keyboard Shortcuts, Accessibility, Settings**.
 - [ ] **Phase 13 — Performance Hardening**: 50k-track fixture profiling.
 - [ ] **Phase 14 — Testing & Build Quality Gate (§36/§38)**.

@@ -20,7 +20,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::Hasher;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Default, Serialize)]
@@ -276,6 +276,30 @@ fn hash_path(path: &Path) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Resolves the on-disk cached artwork file for an already-scanned track,
+/// if one exists — the counterpart read to `resolve_and_cache_artwork`'s
+/// write, used by callers (MPRIS metadata, track-change notifications)
+/// that need the actual file path rather than just "has art: yes/no".
+/// Recomputes the same `track-<hash>` key `process_file` cached under
+/// rather than storing the resolved path in the DB, since the key is
+/// cheap to rederive and this keeps the schema from needing a column
+/// that's only ever a derived value.
+pub fn track_artwork_path(cache_dir: &Path, track: &crate::db::models::Track) -> Option<PathBuf> {
+    let cache_key = format!(
+        "track-{}",
+        track
+            .content_hash
+            .clone()
+            .unwrap_or_else(|| hash_path(Path::new(&track.path)))
+    );
+    let artwork_dir = cache_dir.join("artwork");
+    let entries = fs::read_dir(&artwork_dir).ok()?;
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.file_stem().and_then(|s| s.to_str()) == Some(cache_key.as_str()))
+}
+
 pub(crate) fn hash_file(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     let mut file = fs::File::open(path)?;
@@ -302,6 +326,62 @@ mod tests {
         let b = Path::new("/music/two.flac");
         assert_eq!(hash_path(a), hash_path(a));
         assert_ne!(hash_path(a), hash_path(b));
+    }
+
+    fn test_track(path: &str, content_hash: Option<&str>) -> crate::db::models::Track {
+        crate::db::models::Track {
+            id: 1,
+            path: path.to_string(),
+            title: "Title".to_string(),
+            artist_id: None,
+            album_id: None,
+            album_artist: None,
+            genre_id: None,
+            track_number: None,
+            disc_number: None,
+            year: None,
+            duration_ms: 0,
+            has_embedded_art: content_hash.is_some(),
+            mtime: 0,
+            content_hash: content_hash.map(str::to_string),
+            added_at: 0,
+        }
+    }
+
+    #[test]
+    fn track_artwork_path_finds_a_cached_file_by_content_hash() {
+        let dir = TestDir::new("artwork-lookup-hit");
+        let artwork_dir = dir.path.join("artwork");
+        fs::create_dir_all(&artwork_dir).unwrap();
+        fs::write(artwork_dir.join("track-abc123.png"), b"fake-art").unwrap();
+        let track = test_track("/music/song.flac", Some("abc123"));
+
+        let found = track_artwork_path(&dir.path, &track).unwrap();
+
+        assert_eq!(found, artwork_dir.join("track-abc123.png"));
+    }
+
+    #[test]
+    fn track_artwork_path_falls_back_to_hashing_the_path_without_a_content_hash() {
+        let dir = TestDir::new("artwork-lookup-fallback");
+        let track = test_track("/music/song.flac", None);
+        let artwork_dir = dir.path.join("artwork");
+        fs::create_dir_all(&artwork_dir).unwrap();
+        fs::write(
+            artwork_dir.join(format!("track-{}.jpg", hash_path(Path::new(&track.path)))),
+            b"fake-art",
+        )
+        .unwrap();
+
+        assert!(track_artwork_path(&dir.path, &track).is_some());
+    }
+
+    #[test]
+    fn track_artwork_path_is_none_when_nothing_was_ever_cached() {
+        let dir = TestDir::new("artwork-lookup-miss");
+        let track = test_track("/music/song.flac", Some("abc123"));
+
+        assert!(track_artwork_path(&dir.path, &track).is_none());
     }
 
     struct TestDir {

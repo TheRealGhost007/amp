@@ -11,7 +11,7 @@ pub mod scan;
 
 pub use db::Database;
 pub use metadata_editor::{update_track_metadata, ArtworkUpdate, MetadataUpdate};
-pub use scan::{scan_root, ScanFileError, ScanSummary};
+pub use scan::{scan_root, track_artwork_path, ScanFileError, ScanSummary};
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
