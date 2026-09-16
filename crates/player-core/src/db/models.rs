@@ -84,6 +84,7 @@ pub struct TrackListItem {
     pub artist_name: Option<String>,
     pub album_id: Option<i64>,
     pub album_title: Option<String>,
+    pub album_artist: Option<String>,
     pub genre_name: Option<String>,
     pub track_number: Option<i64>,
     pub disc_number: Option<i64>,

@@ -69,6 +69,10 @@ export function RecentlyPlayed() {
                 void refreshLibrary();
                 refreshRecent();
               },
+              onMetadataUpdated: () => {
+                void refreshLibrary();
+                refreshRecent();
+              },
             })}
           />
         ))}

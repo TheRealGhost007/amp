@@ -10,7 +10,7 @@
 //! makes (`std::fs`, `lofty`, `rusqlite`) already blocks.
 
 mod artwork;
-mod metadata;
+pub(crate) mod metadata;
 mod walk;
 
 use crate::db::models::NewTrack;
@@ -156,15 +156,19 @@ pub fn scan_root(db: &Database, cache_dir: &Path, root: &Path) -> Result<ScanSum
 /// database. Keeps the human-readable artist/album/genre names alongside
 /// the id-based `NewTrack` purely so `index()` can populate the FTS5
 /// index without a second round-trip to look names back up by id.
-struct ProcessedFile {
-    new_track: NewTrack,
+///
+/// `pub(crate)` (not `pub`) — reused by `metadata_editor` to re-derive a
+/// track's DB row from the file after a tag write, exactly like a real
+/// scan would, rather than duplicating this resolution logic.
+pub(crate) struct ProcessedFile {
+    pub(crate) new_track: NewTrack,
     artist_name: Option<String>,
     album_name: Option<String>,
     genre_name: Option<String>,
 }
 
 impl ProcessedFile {
-    fn index(&self, db: &Database, track_id: i64) -> Result<()> {
+    pub(crate) fn index(&self, db: &Database, track_id: i64) -> Result<()> {
         db.index_track_for_search(
             track_id,
             &self.new_track.title,
@@ -180,7 +184,7 @@ impl ProcessedFile {
 /// to the caller is metadata parsing; DB writes (get-or-create
 /// artist/album/genre) use `?` since a `Database` error there is a real
 /// crate-level failure, not a per-file data problem.
-fn process_file(
+pub(crate) fn process_file(
     db: &Database,
     cache_dir: &Path,
     path: &Path,
@@ -244,7 +248,7 @@ fn process_file(
     })
 }
 
-fn file_mtime(path: &Path) -> Option<i64> {
+pub(crate) fn file_mtime(path: &Path) -> Option<i64> {
     let modified = fs::metadata(path).ok()?.modified().ok()?;
     let secs = modified.duration_since(UNIX_EPOCH).ok()?.as_secs();
     Some(secs as i64)
@@ -272,7 +276,7 @@ fn hash_path(path: &Path) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-fn hash_file(path: &Path) -> std::io::Result<String> {
+pub(crate) fn hash_file(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     let mut file = fs::File::open(path)?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();

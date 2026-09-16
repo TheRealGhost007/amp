@@ -50,6 +50,7 @@ export interface TrackListItem {
   artist_name: string | null;
   album_id: number | null;
   album_title: string | null;
+  album_artist: string | null;
   genre_name: string | null;
   track_number: number | null;
   disc_number: number | null;
@@ -163,6 +164,26 @@ export const library = {
 export const history = {
   recordPlayed: (trackId: number) => invoke<void>("history_record_played", { trackId }),
   listRecent: () => listOrEmpty<TrackListItem>("history_list_recent"),
+};
+
+export type ArtworkUpdateInput =
+  { type: "Unchanged" } | { type: "Remove" } | { type: "Replace"; path: string };
+
+export interface MetadataUpdateInput {
+  title: string;
+  artist: string | null;
+  album: string | null;
+  album_artist: string | null;
+  genre: string | null;
+  track_number: number | null;
+  disc_number: number | null;
+  year: number | null;
+  artwork: ArtworkUpdateInput;
+}
+
+export const metadata = {
+  update: (trackId: number, update: MetadataUpdateInput) =>
+    invoke<TrackListItem>("metadata_update_track", { trackId, update }),
 };
 
 export const favorites = {

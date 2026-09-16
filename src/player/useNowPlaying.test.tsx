@@ -37,6 +37,7 @@ function track(id: number, path: string): TrackListItem {
     artist_name: null,
     album_id: null,
     album_title: null,
+    album_artist: null,
     genre_name: null,
     track_number: null,
     disc_number: null,

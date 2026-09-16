@@ -96,6 +96,7 @@ pub fn run() {
             commands::library::library_remove_track,
             commands::history::history_record_played,
             commands::history::history_list_recent,
+            commands::metadata::metadata_update_track,
             commands::favorites::favorites_is_favorite,
             commands::favorites::favorites_toggle,
             commands::favorites::favorites_list_ids,

@@ -225,6 +225,10 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
                         void refreshLibrary();
                         refreshTracks();
                       },
+                      onMetadataUpdated: () => {
+                        void refreshLibrary();
+                        refreshTracks();
+                      },
                     })}
                   />
                 </SortableRow>

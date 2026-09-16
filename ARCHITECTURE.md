@@ -954,6 +954,109 @@ Two real bugs found by re-reading the new Phase 9 code with fresh eyes.
    when `navigationStore.playlistDetailId` is set from outside the
    view, which is the part that actually changed).
 
+## Phase 10: metadata editor and artwork editing
+
+**Writes tags by re-running the scan pipeline, not a parallel code
+path.** `player-core/src/metadata_editor.rs`'s `update_track_metadata`
+writes the new tag values to the file with `lofty`, then calls the
+*same* `scan::process_file` the directory walker uses (elevated from
+private to `pub(crate)` for this) to re-derive the DB row exactly as a
+fresh scan would. This was a deliberate DRY choice over hand-rolling a
+second artist/album/genre `get_or_create` + artwork-cache path here:
+the scanner is already the single source of truth for "what does this
+file's tags mean for the DB," and any future change to that logic
+(e.g. a new fallback rule) now automatically applies to edits too,
+with no risk of the two paths drifting apart.
+
+**Path-traversal defense (spec §37) canonicalizes before comparing.**
+`validate_path_within_roots` resolves both the target track's path and
+every configured scan root with `Path::canonicalize` before checking
+`starts_with` — a raw string-prefix check on unresolved paths would
+miss a symlink or `..`-relative escape. Rejection uses a dedicated
+`Error::PathOutsideLibrary` (wire code `PATH_OUTSIDE_LIBRARY`) instead
+of the generic `Internal` variant, so this specific, security-relevant
+rejection stays identifiable at the IPC boundary rather than looking
+like any other failure. Covered by a regression test that scans a
+fixture, then removes its scan root (simulating a track whose library
+folder was since unconfigured) and confirms the edit is rejected
+without touching the file — and verified again on-device: deleting the
+real scan row for a real scanned file and attempting a save through
+the actual dialog produced the exact same rejection, with neither the
+file nor the DB row touched.
+
+**Artwork import sends a file path over IPC, not raw bytes.** The
+frontend's "Change Artwork" picks a file with the native OS dialog
+(`@tauri-apps/plugin-dialog`) and sends only the chosen path; the Rust
+`metadata_update_track` command reads the bytes itself
+(`std::fs::read`). This avoids shipping a base64-encoded image through
+the Tauri IPC bridge, which would inflate a multi-MB cover image by a
+third for no benefit — the backend has direct filesystem access
+already.
+
+**Artwork preview stays a placeholder, matching the rest of the app.**
+No view anywhere in this app currently renders a track's real cached
+artwork — every `MediaRow`/`Artwork` caller supplies only a `seed` for
+the deterministic placeholder gradient, never a real `src` (confirmed
+by grep before deciding this). Retrofitting real artwork-path plumbing
+just for this one dialog's "current artwork" preview would be
+new, unreviewed scope well beyond what Phase 10 asks for, so the
+editor shows the same placeholder system for the track's current art.
+A newly-*picked* replacement file also stays a placeholder plus a
+"New artwork: <filename>" note rather than a real image thumbnail —
+rendering the actual picked file would need either the Tauri asset
+protocol (a new filesystem-exposure scope decision belonging to a
+security pass, not this dialog) or reading the file into a data URL on
+the frontend via a filesystem plugin this project doesn't otherwise
+depend on. Both are disproportionate to a cosmetic preview; the
+filename note gives the same confirmation with neither cost.
+
+**`TrackListItem` was missing `album_artist`.** Every other editable
+field (title/artist/album/genre/track/disc/year) already had a
+frontend-visible column, but album artist — needed so the editor can
+show and let the user change it — had only ever been threaded through
+the internal `Track`/`NewTrack` structs, never the joined, browse-facing
+`TrackListItem`. Added the column to the struct, the `TRACK_LIST_ITEM_COLUMNS`
+SQL list, and `row_to_track_list_item_offset` (shifting every
+subsequent field's offset by one, the same mechanical change Phase 9
+made when `artist_id`/`album_id` were added) plus the matching
+TypeScript interface and test fixtures — a reminder that a new
+feature's data needs are worth checking against *all* of a type's
+existing consumers, not just the ones the new feature touches directly.
+
+**A real focus-stealing bug, caught only by the dialog's own Vitest
+test, not by hand-testing.** `MetadataEditDialog`'s `handleClose` was a
+plain function defined fresh every render; passed as `Dialog`'s
+`onClose` prop, its changing identity re-ran `Dialog`'s focus-trap
+`useEffect` (which depends on `[open, onClose]`) on every keystroke in
+any field — each re-run's cleanup returned focus to whatever was
+focused before the dialog opened, then its setup immediately moved
+focus to the panel's first focusable element (the header's close
+button), so only a field's *first* typed character ever landed;
+everything after silently went nowhere. Every other dialog in this app
+(`AddToPlaylistDialog`, `ConfirmDialog`) passes a stable, store-owned
+`close` action straight through as `onClose` and never hit this,
+which is exactly why nothing surfaced it before — this dialog was the
+first to wrap `onClose` in a local closure (to guard against closing
+mid-save). Fixed by wrapping it in `useCallback` keyed on `[saving,
+onClose]`. A Vitest test simulating real typing (`userEvent.type`)
+caught this immediately, by asserting the full string reached the
+saved payload — this is the value of testing dialogs through actual
+user interaction rather than only asserting on state after a single
+`fireEvent.change`.
+
+**Verified on-device end to end**, not just via tests: scanned a real
+tagged MP3 fixture into the live app's actual database, opened the
+real dialog (forced via a temporary store-default hardcode, the
+established technique for state that has no clickable path to force
+through native-dialog-heavy flows — reverted before commit), edited
+the title through real keystrokes, confirmed the destructive-action
+warning, and verified both the file's tag (`ffprobe`) and the DB row
+changed, with a success toast and the dialog closing. Then removed the
+fixture's scan root and repeated the save to confirm the path-outside-
+library rejection fires for real, with neither the file nor the DB
+touched, and the exact `PATH_OUTSIDE_LIBRARY` message surfaced as an
+error toast.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

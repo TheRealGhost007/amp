@@ -15,6 +15,7 @@ export { Dialog } from "./Dialog/Dialog";
 export { ConfirmDialog } from "./ConfirmDialog/ConfirmDialog";
 export { ToastProvider, useToast } from "./Toast/Toast";
 export { AddToPlaylistDialog } from "./AddToPlaylistDialog/AddToPlaylistDialog";
+export { MetadataEditDialog } from "./MetadataEditDialog/MetadataEditDialog";
 export { Icon } from "./Icon/Icon";
 export type { IconName } from "./Icon/Icon";
 export { EmptyState } from "./EmptyState/EmptyState";

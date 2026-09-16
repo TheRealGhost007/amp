@@ -74,6 +74,7 @@ export function ArtistDetail({ artistId }: { artistId: number }) {
             onClick={() => void playNow({ id: track.id, uri: pathToFileUri(track.path) })}
             actions={buildTrackMenuItems(track, {
               onRemovedFromLibrary: () => void refresh(),
+              onMetadataUpdated: () => void refresh(),
             })}
           />
         ))}

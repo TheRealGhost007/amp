@@ -121,7 +121,24 @@ plan file's existence means work happened.
       edge — already flagged as a known limitation in the Phase 8
       bug-hunt pass specifically pending this phase. See
       ARCHITECTURE.md.
-- [ ] **Phase 10 — Metadata Editor & Artwork Editing**.
+- [x] **Phase 10 — Metadata Editor & Artwork Editing**: dialog for
+      title/artist/album/album artist/genre/year/track/disc/artwork,
+      writing via `lofty` only after the shared destructive-action
+      confirmation. Writes reuse the scan pipeline (`scan::process_file`)
+      to re-derive the DB row exactly as a fresh scan would, rather than
+      duplicating artist/album/genre resolution. Path-traversal defense
+      (spec §37) canonicalizes both the track's path and every
+      configured scan root before comparing, with a dedicated
+      `PathOutsideLibrary` error. Artwork import sends the picker's file
+      path over IPC, not raw bytes. Caught a real focus-stealing bug via
+      a Vitest test that types through the dialog like a real user
+      (`MetadataEditDialog`'s `onClose` wasn't memoized, so `Dialog`'s
+      focus trap refired on every keystroke). Verified fully on-device:
+      a real scanned file's title edited through the actual dialog
+      updated both the file and the DB with the UI reflecting it
+      immediately, and removing the file's scan root and retrying
+      produced the exact path-outside-library rejection with nothing
+      written. See ARCHITECTURE.md.
 - [ ] **Phase 11 — Linux/Omarchy Integration**: MPRIS, media keys,
       notifications, PipeWire device switching.
 - [ ] **Phase 12 — Keyboard Shortcuts, Accessibility, Settings**.

@@ -148,6 +148,7 @@ export function Library() {
                     onClick={() => handlePlay(track)}
                     actions={buildTrackMenuItems(track, {
                       onRemovedFromLibrary: () => void refresh(),
+                      onMetadataUpdated: () => void refresh(),
                     })}
                   />
                 </div>

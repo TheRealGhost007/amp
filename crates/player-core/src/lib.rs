@@ -6,9 +6,11 @@
 
 pub mod db;
 pub mod error;
+pub mod metadata_editor;
 pub mod scan;
 
 pub use db::Database;
+pub use metadata_editor::{update_track_metadata, ArtworkUpdate, MetadataUpdate};
 pub use scan::{scan_root, ScanFileError, ScanSummary};
 
 pub fn version() -> &'static str {

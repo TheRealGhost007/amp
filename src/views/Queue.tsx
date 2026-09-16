@@ -137,6 +137,10 @@ export function Queue() {
                           void refreshLibrary();
                           void useQueueStore.getState().init();
                         },
+                        onMetadataUpdated: () => {
+                          void refreshLibrary();
+                          void useQueueStore.getState().init();
+                        },
                       })}
                     />
                   </SortableRow>

@@ -86,6 +86,7 @@ export function Favorites() {
                   }
                   actions={buildTrackMenuItems(track, {
                     onRemovedFromLibrary: () => void refresh(),
+                    onMetadataUpdated: () => void refresh(),
                   })}
                 />
               </div>

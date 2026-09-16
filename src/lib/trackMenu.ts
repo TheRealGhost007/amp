@@ -3,6 +3,7 @@ import type { MenuItemSpec } from "../components";
 import { useAddToPlaylistDialogStore } from "../store/addToPlaylistDialogStore";
 import { useConfirmDialogStore } from "../store/confirmDialogStore";
 import { useFavoritesStore } from "../store/favoritesStore";
+import { useMetadataEditDialogStore } from "../store/metadataEditDialogStore";
 import { useNavigationStore } from "../store/navigationStore";
 import { usePlaybackStore } from "../store/playbackStore";
 import { useQueueStore } from "../store/queueStore";
@@ -19,6 +20,10 @@ export interface TrackMenuOptions {
    * `LibraryContext`/`queueStore`/local track list); this menu builder
    * has no single global cache it could refresh on every view's behalf. */
   onRemovedFromLibrary?: () => void;
+  /** Called after the metadata editor saves changes to this track, so
+   * the calling view's own visible list picks up the new title/artist/
+   * album/etc. immediately — same reasoning as `onRemovedFromLibrary`. */
+  onMetadataUpdated?: () => void;
 }
 
 /** Spec §15: one shared context-menu builder for every song row in the
@@ -111,6 +116,12 @@ export function buildTrackMenuItems(
       id: "open-file-location",
       label: "Open File Location",
       onSelect: () => void revealItemInDir(track.path),
+    },
+    {
+      id: "edit-metadata",
+      label: "Edit Metadata…",
+      onSelect: () =>
+        useMetadataEditDialogStore.getState().open(track.id, options.onMetadataUpdated),
     },
   ]);
 

@@ -10,14 +10,37 @@ use super::models::{
 };
 use super::Database;
 use crate::error::Result;
+use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 
 const TRACK_LIST_ITEM_COLUMNS: &str = "
-    t.id, t.path, t.title, t.artist_id, ar.name, t.album_id, al.title, g.name,
+    t.id, t.path, t.title, t.artist_id, ar.name, t.album_id, al.title,
+    t.album_artist, g.name,
     t.track_number, t.disc_number, t.duration_ms, t.year,
     t.has_embedded_art, t.added_at";
 
 impl Database {
+    /// A single track, joined to display-ready fields — used to return
+    /// a fresh row immediately after an edit (metadata update, favorite
+    /// toggle from elsewhere, ...) without re-fetching the whole library.
+    pub fn get_track_for_browse(&self, track_id: i64) -> Result<Option<TrackListItem>> {
+        self.conn
+            .query_row(
+                &format!(
+                    "SELECT {TRACK_LIST_ITEM_COLUMNS}
+                     FROM tracks t
+                     LEFT JOIN artists ar ON ar.id = t.artist_id
+                     LEFT JOIN albums al ON al.id = t.album_id
+                     LEFT JOIN genres g ON g.id = t.genre_id
+                     WHERE t.id = ?1"
+                ),
+                rusqlite::params![track_id],
+                Self::row_to_track_list_item,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn list_tracks_for_browse(&self) -> Result<Vec<TrackListItem>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {TRACK_LIST_ITEM_COLUMNS}
@@ -215,13 +238,14 @@ impl Database {
             artist_name: row.get(offset + 4)?,
             album_id: row.get(offset + 5)?,
             album_title: row.get(offset + 6)?,
-            genre_name: row.get(offset + 7)?,
-            track_number: row.get(offset + 8)?,
-            disc_number: row.get(offset + 9)?,
-            duration_ms: row.get(offset + 10)?,
-            year: row.get(offset + 11)?,
-            has_embedded_art: row.get(offset + 12)?,
-            added_at: row.get(offset + 13)?,
+            album_artist: row.get(offset + 7)?,
+            genre_name: row.get(offset + 8)?,
+            track_number: row.get(offset + 9)?,
+            disc_number: row.get(offset + 10)?,
+            duration_ms: row.get(offset + 11)?,
+            year: row.get(offset + 12)?,
+            has_embedded_art: row.get(offset + 13)?,
+            added_at: row.get(offset + 14)?,
         })
     }
 }

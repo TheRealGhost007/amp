@@ -23,6 +23,15 @@ pub enum Error {
     #[error("{0}")]
     NotFound(String),
 
+    /// A file operation (currently: metadata editing) targeted a path
+    /// outside every configured library root — spec §37: metadata and
+    /// filenames are untrusted input, and file writes must never escape
+    /// the folders the user explicitly added to their library. Kept
+    /// distinct from `Internal` so this rejection is identifiable by
+    /// its own error code rather than looking like a generic failure.
+    #[error("path is outside the configured library folders: {0}")]
+    PathOutsideLibrary(String),
+
     #[error("{0}")]
     Internal(String),
 }
@@ -42,6 +51,7 @@ impl Error {
             Error::Migration(_) => "MIGRATION_ERROR",
             Error::NoAppDirs => "NO_APP_DIRS",
             Error::NotFound(_) => "NOT_FOUND",
+            Error::PathOutsideLibrary(_) => "PATH_OUTSIDE_LIBRARY",
             Error::Internal(_) => "INTERNAL_ERROR",
         }
     }
