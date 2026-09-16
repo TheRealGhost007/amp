@@ -805,6 +805,20 @@ the kind jsdom-based component tests are unlikely to have caught
 (one about a specific data-state combination, one about load-order
 timing on a fresh launch).
 
+**Post-Phase-8 bug-hunt pass**: `queueStore.ts`'s `syncNextWithBackend` —
+called after every queue mutation — let `player.setNext()`'s rejection
+propagate unguarded. On a machine where the audio backend never
+initialized (`audioUnavailable`, spec §27 — the app still runs without
+one), every single queue action (add/remove/reorder/clear/...) would
+throw an unhandled rejection, even though the mutation itself (a DB
+write) had already succeeded. `playbackStore`'s `fetchFavoriteStatus`
+already established the right precedent for exactly this shape —
+swallow a best-effort, non-critical IPC failure rather than let it
+propagate — `syncNextWithBackend` just hadn't followed it. Fixed with
+the same try/catch; verified with a regression test (mocking
+`player.setNext` to reject) confirmed to fail without the fix and pass
+with it.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

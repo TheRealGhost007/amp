@@ -32,9 +32,19 @@ interface QueueStore {
  * (which clears the backend's `next` as a side effect). */
 async function syncNextWithBackend(items: QueueTrackItem[]) {
   const head = items[0];
-  await player.setNext(
-    head ? { id: head.track.id, uri: pathToFileUri(head.track.path) } : null,
-  );
+  try {
+    await player.setNext(
+      head ? { id: head.track.id, uri: pathToFileUri(head.track.path) } : null,
+    );
+  } catch {
+    // The audio backend can be unavailable (spec §27 — the app still
+    // runs without one); the queue mutation itself already succeeded,
+    // so there's nothing actionable here. Without this, every queue
+    // action (add/remove/reorder/clear/...) would throw an unhandled
+    // rejection on a machine where audio never initialized — matches
+    // fetchFavoriteStatus's precedent for this same "best-effort,
+    // non-critical IPC call" shape.
+  }
 }
 
 export const useQueueStore = create<QueueStore>((set, get) => ({

@@ -110,4 +110,19 @@ describe("queueStore", () => {
     expect(removeMock).not.toHaveBeenCalled();
     expect(useQueueStore.getState().items).toEqual([item(10, 1, "/a.flac")]);
   });
+
+  it("does not throw when the backend's next slot can't be armed (e.g. audio unavailable)", async () => {
+    // Regression test: every mutation calls syncNextWithBackend, which
+    // previously let player.setNext's rejection propagate unguarded —
+    // on a machine where the audio backend never initialized, every
+    // single queue action would throw an unhandled rejection even
+    // though the queue mutation itself (a DB write) had already
+    // succeeded. fetchFavoriteStatus already established the precedent
+    // of swallowing this class of best-effort IPC failure.
+    setNextMock.mockRejectedValue({ code: "AUDIO_UNAVAILABLE" });
+    listMock.mockResolvedValue([item(10, 1, "/a.flac")]);
+
+    await expect(useQueueStore.getState().addToQueue(1)).resolves.toBeUndefined();
+    expect(useQueueStore.getState().items).toEqual([item(10, 1, "/a.flac")]);
+  });
 });
