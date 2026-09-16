@@ -188,7 +188,31 @@ plan file's existence means work happened.
       rebind/conflict-detection/reset flow works reached purely via Tab
       navigation, and all four new Settings sections render and persist
       correctly. See ARCHITECTURE.md.
-- [ ] **Phase 13 — Performance Hardening**: 50k-track fixture profiling.
+- [x] **Phase 13 — Performance Hardening**: audit-first — most checks
+      confirmed the code already does the right thing (React re-render
+      discipline, scan running off the UI thread via `spawn_blocking`,
+      debounce values, list virtualization scoped to what actually
+      reaches library scale) rather than needing a fix. Two real fixes
+      landed: (1) the artwork disk cache had no bound in either
+      direction a track leaves the library — neither a rescan-detected
+      deletion, "Remove From Library," nor removing a scan root
+      entirely (which also left every one of its tracks permanently
+      orphaned in the DB, not just their artwork) ever cleaned up the
+      cached file or the orphaned rows; fixed with two new player-core
+      functions, `remove_cached_artwork` and
+      `remove_scan_root_and_its_tracks`, both regression-tested against
+      a confirmed-failing reverted version. (2) The playback tick loop
+      emitted `player-position` to the frontend unconditionally every
+      200ms forever, even while paused or idle, and recomputed an
+      invariant XDG cache path on every tick — both fixed by gating on
+      `is_playing()` and hoisting the path lookup out of the loop.
+      Re-ran the 50k-track scan fixture in release mode (the historical
+      baseline's own build profile) and confirmed no regression: 5.45s,
+      actually faster than the earlier figure. Measured real startup
+      (378ms cold, via a proper `tauri build --no-bundle`, not a plain
+      `cargo build --release`) and memory (~200MB RSS, mostly
+      WebKitGTK's own baseline) — both comfortably reasonable. See
+      ARCHITECTURE.md.
 - [ ] **Phase 14 — Testing & Build Quality Gate (§36/§38)**.
 - [ ] **Phase 15 — UI/UX Polish Pass + Second Performance Pass**.
 - [ ] **Phase 16 — Security Pass (§37)**.

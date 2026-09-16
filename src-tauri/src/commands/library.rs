@@ -8,7 +8,10 @@
 use crate::error::AppResult;
 use crate::state::AppState;
 use player_core::db::models::{AlbumSummary, ArtistSummary, TrackListItem};
-use player_core::{scan_root, Database, ScanSummary};
+use player_core::{
+    remove_cached_artwork, remove_scan_root_and_its_tracks, scan_root, Database, ScanSummary,
+};
+use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
@@ -31,10 +34,16 @@ pub fn library_list_scan_roots(state: State<AppState>) -> AppResult<Vec<String>>
     Ok(db.list_scan_roots()?)
 }
 
+/// Removes a scan root and every track it ever contributed (Settings >
+/// Library's "Remove") — `Database::remove_scan_root` alone would only
+/// stop the folder from being rescanned, leaving its tracks permanently
+/// orphaned in the library with no other path to cleaning them up (see
+/// `remove_scan_root_and_its_tracks`'s doc comment).
 #[tauri::command]
 pub fn library_remove_scan_root(state: State<AppState>, path: String) -> AppResult<()> {
     let db = state.db.lock().unwrap();
-    db.remove_scan_root(&path)?;
+    let cache_dir = Database::default_cache_dir()?;
+    remove_scan_root_and_its_tracks(&db, &cache_dir, &path)?;
     Ok(())
 }
 
@@ -64,11 +73,21 @@ pub fn library_search(state: State<AppState>, query: String) -> AppResult<Vec<Tr
 
 /// Permanently removes one track from the library (context menu's
 /// "Remove From Library") — distinct from a scan picking up that the
-/// file is simply gone; this also drops it from the search index so a
-/// stale entry can't outlive the row it points to.
+/// file is simply gone; this also drops it from the search index and its
+/// cached artwork file so neither can outlive the row it points to (the
+/// artwork cache has no other eviction mechanism — see
+/// `remove_cached_artwork`'s doc comment).
 #[tauri::command]
 pub fn library_remove_track(state: State<AppState>, track_id: i64) -> AppResult<()> {
     let db = state.db.lock().unwrap();
+    if let Some(track) = db.get_track(track_id)? {
+        let cache_dir = Database::default_cache_dir()?;
+        remove_cached_artwork(
+            &cache_dir,
+            track.content_hash.as_deref(),
+            Path::new(&track.path),
+        );
+    }
     db.remove_track_from_search_index(track_id)?;
     db.delete_track(track_id)?;
     Ok(())

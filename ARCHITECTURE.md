@@ -1399,6 +1399,156 @@ navigation; Settings > Playback/Library/Audio all render their real
 controls (crossfade toggle, scan-roots list, device dropdown, 10-band
 EQ) correctly end to end.
 
+## Phase 13: performance hardening
+
+Audit-first, not fix-first: most of this phase was verifying specific,
+falsifiable claims (does X actually happen, is Y actually a cost) before
+touching any code, and only two of the checks below turned up something
+real enough to change. Two real fixes landed; everything else is an
+audit result — either "already fine, here's the evidence" or "known,
+already-documented tradeoff, re-confirmed still correct."
+
+**Real fix #1 — the artwork disk cache had no bound at all, in either
+direction tracks leave the library.** `Database::delete_track` only ever
+deleted the DB row; nothing, anywhere, ever deleted the cached artwork
+file a removed track had written under `<cache_dir>/artwork/`. Two
+distinct call sites hit this: a rescan noticing a file is simply gone
+(`scan_root`'s `missing` loop), and the "Remove From Library" context-
+menu command. Worse, `Database::remove_scan_root` (the new Settings >
+Library "Remove" button from Phase 12) only ever stopped a folder from
+being _rescanned_ — every track it had already contributed to the
+library stayed in the DB and in every browse view forever, orphaned
+from any root, with its artwork cache file permanently unreachable
+(there is no other path that would ever notice these tracks again,
+since the root that used to own them no longer exists to be rescanned).
+For a large library, both of these are genuine unbounded growth: an
+artwork cache that only ever grows, and phantom library rows a user
+explicitly asked to remove that never actually go away.
+
+Fixed with two new `player-core` functions rather than patching each
+call site ad hoc:
+
+- `remove_cached_artwork(cache_dir, content_hash, path)` — derives the
+  same `track-<hash>` cache key `process_file` writes under (extracted
+  into a shared `artwork_cache_key` helper so the write side and both
+  read/delete sides can never drift apart) and removes the matching
+  file, best-effort. Wired into both of `delete_track`'s call sites
+  (`scan_root`'s deletion loop and `library_remove_track`).
+- `remove_scan_root_and_its_tracks(db, cache_dir, root_path)` — the real
+  implementation behind "Remove" in Settings > Library now. Uses the
+  exact same `tracks_for_scan_diff` prefix match `scan_root` itself uses
+  to decide what belongs to a root, so "everything this deletes" is
+  precisely "everything a rescan of this same root would still
+  recognize as its own." Deletes each track's cached artwork, its
+  search-index entry, and the row itself (favorites/playlist_tracks/
+  queue/playback_history all cascade via their existing `ON DELETE
+CASCADE` foreign keys), then removes the root registration — all
+  inside one transaction, for the same reason `scan_root` itself uses
+  one: an interrupted partial removal would be worse than either
+  finishing or rolling back.
+
+Five new regression tests, each confirmed to fail against a reverted
+(no-op) version of its fix before being confirmed to pass against the
+real one: cache-file deletion in isolation, isolation from an unrelated
+track's cache entry, a no-op on a missing cache dir, an end-to-end
+scan-detects-deletion-then-cache-file-is-gone test (using folder art
+since the existing `build_wav` test fixture doesn't embed real tag
+art), and both a same-root and cross-root case for
+`remove_scan_root_and_its_tracks`.
+
+**Real fix #2 — the playback tick loop did unconditional, wasted 200ms-
+forever background work.** Two separate things, found together while
+auditing `spawn_player_tick_loop` for "polling loops / redundant IPC
+calls" (this phase's own exit-criteria wording):
+
+1. `player-position` was emitted to the frontend every single tick
+   regardless of playback state. Position only ever _changes_ while
+   actually playing, so a paused or fully idle (no track loaded) app
+   kept serializing and posting an identical IPC payload to the webview
+   5 times a second, forever, for as long as the app stayed open — for
+   no visible effect, since Zustand's selector equality check already
+   silently absorbed the resulting no-op `set()` calls on the frontend
+   side; the waste was entirely on the Rust/IPC side. Fixed by gating
+   the emit on `player.is_playing()`. Verified this doesn't lose any
+   real update: a paused seek already updates `positionMs` directly
+   through the `seek()` store action (independent of the tick loop), a
+   fresh `playNow` sets `isPlaying: true` before the next tick fires, and
+   grepping confirmed `playbackStore` is the _only_ consumer of the
+   `player-position` event anywhere in the frontend.
+2. `Database::default_cache_dir()` (an XDG-path/`ProjectDirs` lookup)
+   was called fresh on every tick whenever MPRIS is active — a value
+   that's invariant for the entire life of the process. Hoisted out of
+   the loop to be computed once at `spawn_player_tick_loop` startup
+   instead of 5 times a second forever.
+
+No regression test for either — this is `src-tauri`'s tick-loop
+plumbing, which (per its own established convention, see
+`NowPlayingTracker`'s doc comment from Phase 11) is intentionally
+untested glue rather than logic; both changes were verified by reading
+every consumer of the affected event, not by guessing.
+
+**Audited and confirmed already correct, no change made:**
+
+- **React re-render discipline.** Grepped every Zustand store for a
+  whole-store subscription (`useXStore()` with no selector) — none
+  exist; every call site already selects the narrowest slice it needs,
+  the discipline established in Phase 5 and never violated since.
+  `positionMs`/`durationMs` (the only state that changes every tick) are
+  subscribed to by exactly two components, `MiniPlayer` and
+  `FullPlayer` — both small, self-contained trees with no virtualized-
+  list descendants, so a 5×/second re-render there is cheap and
+  expected, not a jank source. `useNowPlaying` (shared by both) doesn't
+  itself select position, so it doesn't re-run on every tick either.
+- **Scan already runs off the UI/tick-loop thread.** `library_add_folder`
+  wraps `scan_root` in `tauri::async_runtime::spawn_blocking`, confirmed
+  by reading the command, not assumed from its doc comment.
+- **Debounce values are already reasonable.** Library search: 200ms.
+  Command palette search: 150ms. Both pre-existing, no change needed.
+- **List virtualization matches actual scale, not just library size.**
+  Library/Albums/Artists/Favorites/RecentlyPlayed (the views that scale
+  with total library size) all already use `@tanstack/react-virtual`
+  since Phases 6 and 9. Queue/Playlists/AlbumDetail/ArtistDetail don't
+  — confirmed this is a reasonable scope decision rather than a gap by
+  checking whether any bulk "select all → add to playlist/queue"
+  feature exists (it doesn't; tracks can only be added one at a time via
+  context menu or drag), which structurally bounds these views to at
+  most a few hundred items in realistic use, never library scale.
+- **50k-track scan throughput has not regressed.** Re-ran the existing
+  `#[ignore]`d 50k-file fixture test. First measurement (13.7s, `cargo
+test` debug profile) looked like a possible regression against the
+  historical 7.9s baseline — but that baseline was always a `--release`
+  number (the test's own doc comment says so) and the debug-mode run
+  was never a fair comparison. Re-ran with `--release`: **5.45s**,
+  actually faster than the historical figure, not slower. Lesson for
+  next time: check what build profile a historical timing claim was
+  measured under before treating a new number as a regression.
+- **Artwork "in-memory bound" is moot for now, not skipped.** No view
+  anywhere in the app currently renders a track's real cached artwork —
+  every `Artwork`/`MediaRow` caller supplies only a `seed` for the
+  deterministic placeholder gradient (confirmed by grep: zero call sites
+  pass a real `src`). This was already deliberately deferred in Phase
+  10's own writeup (real artwork display needs a Tauri asset-protocol
+  filesystem-exposure decision that belongs to Phase 16's security
+  pass, not a UI phase). Since no image is ever actually loaded, there
+  is currently nothing for an in-memory cache to bound — re-confirmed
+  the decision still holds rather than re-litigating it.
+
+**Startup time and memory, measured on this machine, not assumed:**
+built a real production binary (`npx tauri build --no-bundle` — a plain
+`cargo build --release` does _not_ embed `frontendDist`; that only
+happens via the `custom-protocol` feature the Tauri CLI enables, so an
+early attempt at this measurement silently loaded `http://localhost:1420`
+instead and failed with "Connection refused" once the dev server wasn't
+running — worth remembering for next time this needs re-measuring).
+Launched the resulting binary cold and timed from process exec to its
+window registering with Hyprland (`hyprctl clients`, matching on window
+class): **378ms**. RSS after startup: **~200MB**, most of which is
+WebKitGTK's own engine overhead shared by any app built on it, not
+specific to this app's code — consistent with the same ballpark seen in
+this machine's other WebKitGTK/Tauri sibling projects. Both numbers are
+comfortably within reasonable bounds for a native-feeling desktop app;
+neither warranted further work this phase.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

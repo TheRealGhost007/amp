@@ -53,6 +53,11 @@ fn spawn_player_tick_loop(app_handle: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(TICK_INTERVAL_MS));
         let mut now_playing = NowPlayingTracker::new();
+        // XDG paths never change for the life of the process — computed
+        // once here rather than on every tick, since this loop otherwise
+        // runs `ProjectDirs::from` (environment-variable lookups) 5 times
+        // a second, forever, for a value that's already invariant.
+        let cache_dir = Database::default_cache_dir().unwrap_or_default();
         loop {
             interval.tick().await;
             let state = app_handle.state::<AppState>();
@@ -62,20 +67,30 @@ fn spawn_player_tick_loop(app_handle: tauri::AppHandle) {
                     continue;
                 };
                 let events = player.tick(TICK_INTERVAL_MS);
+                let is_playing = player.is_playing();
                 let position_ms = player.position_ms();
                 let duration_ms = player.duration_ms();
-                let position = serde_json::json!({
-                    "position_ms": position_ms,
-                    "duration_ms": duration_ms,
+                // Position only changes while actually playing — emitting
+                // it every 200ms regardless of state meant a paused or
+                // idle app kept serializing and posting an IPC event to
+                // the webview forever with an always-identical payload,
+                // for as long as the app stayed open. `player-event`
+                // (StateChanged/TrackAdvanced/etc.) already tells the
+                // frontend about every other transition, so there's
+                // nothing lost by skipping this one while nothing is
+                // moving.
+                let position = is_playing.then(|| {
+                    serde_json::json!({
+                        "position_ms": position_ms,
+                        "duration_ms": duration_ms,
+                    })
                 });
 
                 let track_id = player.current_track().map(|t| t.id);
                 let (snapshot, notify) = if state.mpris.is_some() {
                     let db = state.db.lock().unwrap();
-                    let cache_dir = Database::default_cache_dir().unwrap_or_default();
                     let is_new_track = now_playing.refresh_if_changed(&db, &cache_dir, track_id);
-                    let playback_state =
-                        playback_state_for(player.is_playing(), track_id.is_some());
+                    let playback_state = playback_state_for(is_playing, track_id.is_some());
                     let snapshot = now_playing.snapshot(
                         position_ms.unwrap_or(0),
                         duration_ms,
@@ -106,8 +121,10 @@ fn spawn_player_tick_loop(app_handle: tauri::AppHandle) {
                 }
             }
 
-            if let Err(e) = app_handle.emit("player-position", position) {
-                tracing::warn!("failed to emit player-position: {e}");
+            if let Some(position) = position {
+                if let Err(e) = app_handle.emit("player-position", position) {
+                    tracing::warn!("failed to emit player-position: {e}");
+                }
             }
             match events {
                 Ok(events) => {

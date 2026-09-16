@@ -5,7 +5,13 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "src-tauri/target"] },
+  // The Cargo workspace's build output lands at the top-level `target/`
+  // (this is a workspace, not a standalone `src-tauri` crate), not
+  // `src-tauri/target` — that stale pattern never matched anything,
+  // which stayed invisible until a `cargo tauri build` first generated
+  // JS inside `target/release/build/.../tauri-codegen-assets/` for
+  // ESLint to trip over.
+  { ignores: ["dist", "target", "src-tauri/target"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

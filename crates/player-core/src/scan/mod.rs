@@ -141,6 +141,7 @@ pub fn scan_root(db: &Database, cache_dir: &Path, root: &Path) -> Result<ScanSum
 
     for row in missing {
         if !matched_missing_ids.contains(&row.id) {
+            remove_cached_artwork(cache_dir, row.content_hash.as_deref(), Path::new(&row.path));
             db.remove_track_from_search_index(row.id)?;
             db.delete_track(row.id)?;
             summary.removed += 1;
@@ -210,15 +211,7 @@ pub(crate) fn process_file(
         None => None,
     };
 
-    // Falling back to a fixed "unknown" key here would let two different
-    // files that both fail to hash (a rare I/O error, not the common
-    // case) silently overwrite each other's cached artwork under the
-    // same cache filename. Hashing the path instead keeps the key unique
-    // per file even when content hashing fails.
-    let cache_key = format!(
-        "track-{}",
-        content_hash.clone().unwrap_or_else(|| hash_path(path))
-    );
+    let cache_key = artwork_cache_key(content_hash.as_deref(), path);
     let artwork_cached = artwork::resolve_and_cache_artwork(
         &cache_dir.join("artwork"),
         &cache_key,
@@ -276,6 +269,22 @@ fn hash_path(path: &Path) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Falling back to a fixed "unknown" key here would let two different
+/// files that both fail to hash (a rare I/O error, not the common case)
+/// silently collide on the same cached-artwork filename. Hashing the path
+/// instead keeps the key unique per file even when content hashing
+/// fails. Shared by the write side (`process_file`) and both read-side
+/// consumers below (`track_artwork_path`, `remove_cached_artwork`) so the
+/// key formula can't drift out of sync between them.
+fn artwork_cache_key(content_hash: Option<&str>, path: &Path) -> String {
+    format!(
+        "track-{}",
+        content_hash
+            .map(str::to_string)
+            .unwrap_or_else(|| hash_path(path))
+    )
+}
+
 /// Resolves the on-disk cached artwork file for an already-scanned track,
 /// if one exists — the counterpart read to `resolve_and_cache_artwork`'s
 /// write, used by callers (MPRIS metadata, track-change notifications)
@@ -285,19 +294,78 @@ fn hash_path(path: &Path) -> String {
 /// cheap to rederive and this keeps the schema from needing a column
 /// that's only ever a derived value.
 pub fn track_artwork_path(cache_dir: &Path, track: &crate::db::models::Track) -> Option<PathBuf> {
-    let cache_key = format!(
-        "track-{}",
-        track
-            .content_hash
-            .clone()
-            .unwrap_or_else(|| hash_path(Path::new(&track.path)))
-    );
+    let cache_key = artwork_cache_key(track.content_hash.as_deref(), Path::new(&track.path));
     let artwork_dir = cache_dir.join("artwork");
     let entries = fs::read_dir(&artwork_dir).ok()?;
     entries
         .flatten()
         .map(|entry| entry.path())
         .find(|path| path.file_stem().and_then(|s| s.to_str()) == Some(cache_key.as_str()))
+}
+
+/// Permanently removes a scan root and every track that was ever scanned
+/// from it (plus their cached artwork and search-index entries) — the
+/// real implementation behind Settings > Library's "Remove" button.
+/// `Database::remove_scan_root` alone only stops the root from being
+/// rescanned in the future; without this, every track it had already
+/// contributed stayed in the library forever, orphaned from any root and
+/// indistinguishable in Library/Albums/Artists from a track whose folder
+/// is still configured — an unbounded, permanent leak of both DB rows
+/// and their cached artwork files, since nothing else was ever going to
+/// notice they belonged to a now-removed root. Uses the same
+/// `tracks_for_scan_diff` prefix match `scan_root` itself uses to decide
+/// what belongs to a root, so "everything this removal deletes" is
+/// exactly "everything a rescan of this same root would still recognize
+/// as its own." One transaction for the whole operation, same reasoning
+/// as `scan_root`'s own: a large library's removal round-tripping SQLite
+/// autocommit's fsync-per-statement for every track would be needlessly
+/// slow, and a partial removal left half-done by an interruption would
+/// be worse than either finishing or rolling back cleanly.
+pub fn remove_scan_root_and_its_tracks(
+    db: &Database,
+    cache_dir: &Path,
+    root_path: &str,
+) -> Result<usize> {
+    let txn = db.conn.unchecked_transaction()?;
+    let tracks = db.tracks_for_scan_diff(root_path)?;
+    for track in &tracks {
+        remove_cached_artwork(
+            cache_dir,
+            track.content_hash.as_deref(),
+            Path::new(&track.path),
+        );
+        db.remove_track_from_search_index(track.id)?;
+        db.delete_track(track.id)?;
+    }
+    db.remove_scan_root(root_path)?;
+    txn.commit()?;
+    Ok(tracks.len())
+}
+
+/// Deletes a track's cached artwork file, if any — the cleanup
+/// counterpart to `resolve_and_cache_artwork`'s write, called wherever a
+/// track row is permanently removed (a rescan noticing the file is gone,
+/// or the "Remove From Library" command) so the artwork cache doesn't
+/// grow forever for tracks that no longer exist in the library. Takes
+/// the raw `content_hash`/`path` fields rather than a full `Track` so it
+/// works equally for a `Track` and a scan-internal `ScanDiffRow`. The
+/// cache key is derived from this specific track's own content hash (or
+/// its path, as the same fallback `process_file` uses), never shared
+/// with another track's entry, so removing it can't affect any other
+/// track's cached art. Best-effort: a missing or unremovable file is not
+/// an error worth surfacing — the track row is already gone either way.
+pub fn remove_cached_artwork(cache_dir: &Path, content_hash: Option<&str>, path: &Path) {
+    let cache_key = artwork_cache_key(content_hash, path);
+    let artwork_dir = cache_dir.join("artwork");
+    let Ok(entries) = fs::read_dir(&artwork_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if entry_path.file_stem().and_then(|s| s.to_str()) == Some(cache_key.as_str()) {
+            let _ = fs::remove_file(entry_path);
+        }
+    }
 }
 
 pub(crate) fn hash_file(path: &Path) -> std::io::Result<String> {
@@ -382,6 +450,54 @@ mod tests {
         let track = test_track("/music/song.flac", Some("abc123"));
 
         assert!(track_artwork_path(&dir.path, &track).is_none());
+    }
+
+    #[test]
+    fn remove_cached_artwork_deletes_the_matching_file() {
+        let dir = TestDir::new("artwork-remove-hit");
+        let artwork_dir = dir.path.join("artwork");
+        fs::create_dir_all(&artwork_dir).unwrap();
+        let cached_file = artwork_dir.join("track-abc123.png");
+        fs::write(&cached_file, b"fake-art").unwrap();
+        let track = test_track("/music/song.flac", Some("abc123"));
+
+        remove_cached_artwork(
+            &dir.path,
+            track.content_hash.as_deref(),
+            Path::new(&track.path),
+        );
+
+        assert!(!cached_file.exists());
+    }
+
+    #[test]
+    fn remove_cached_artwork_of_one_track_does_not_touch_another_tracks_cache_file() {
+        let dir = TestDir::new("artwork-remove-isolated");
+        let artwork_dir = dir.path.join("artwork");
+        fs::create_dir_all(&artwork_dir).unwrap();
+        let other_file = artwork_dir.join("track-def456.png");
+        fs::write(&other_file, b"other-track-art").unwrap();
+        let track = test_track("/music/song.flac", Some("abc123"));
+
+        remove_cached_artwork(
+            &dir.path,
+            track.content_hash.as_deref(),
+            Path::new(&track.path),
+        );
+
+        assert!(other_file.exists());
+    }
+
+    #[test]
+    fn remove_cached_artwork_on_a_missing_cache_dir_does_not_panic() {
+        let dir = TestDir::new("artwork-remove-no-cache-dir");
+        let track = test_track("/music/song.flac", Some("abc123"));
+
+        remove_cached_artwork(
+            &dir.path,
+            track.content_hash.as_deref(),
+            Path::new(&track.path),
+        );
     }
 
     struct TestDir {
@@ -567,6 +683,97 @@ mod tests {
 
         assert_eq!(summary.removed, 1);
         assert!(db.list_tracks().unwrap().is_empty());
+    }
+
+    #[test]
+    fn scan_detects_deleted_file_and_removes_its_cached_artwork() {
+        let dir = TestDir::new("deleted-with-artwork");
+        let cache = dir.path.join("cache");
+        let path = dir.path.join("track.wav");
+        fs::write(&path, build_wav(None, 0.2)).unwrap();
+        // Folder art, not embedded, since `build_wav` doesn't embed real
+        // tag art — this still exercises the same cache-write path
+        // (`process_file` -> `resolve_and_cache_artwork`) that embedded
+        // art would.
+        fs::write(dir.path.join("cover.jpg"), b"fake-cover-bytes").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        scan_root(&db, &cache, &dir.path).unwrap();
+        let track = db.list_tracks().unwrap().into_iter().next().unwrap();
+        let cached_path = track_artwork_path(&cache, &track)
+            .expect("folder art should have been cached on first scan");
+        assert!(cached_path.exists());
+
+        fs::remove_file(&path).unwrap();
+        let summary = scan_root(&db, &cache, &dir.path).unwrap();
+
+        assert_eq!(summary.removed, 1);
+        assert!(
+            !cached_path.exists(),
+            "cached artwork must not outlive the track row it belonged to"
+        );
+    }
+
+    #[test]
+    fn remove_scan_root_and_its_tracks_deletes_tracks_artwork_and_the_root_itself() {
+        let dir = TestDir::new("remove-root");
+        let cache = dir.path.join("cache");
+        let root = dir.path.join("music");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("track.wav"), build_wav(None, 0.2)).unwrap();
+        fs::write(root.join("cover.jpg"), b"fake-cover-bytes").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        scan_root(&db, &cache, &root).unwrap();
+        let track = db.list_tracks().unwrap().into_iter().next().unwrap();
+        let cached_path = track_artwork_path(&cache, &track).unwrap();
+        assert!(cached_path.exists());
+        assert_eq!(
+            db.list_scan_roots().unwrap(),
+            vec![root.to_string_lossy().to_string()]
+        );
+
+        let removed =
+            remove_scan_root_and_its_tracks(&db, &cache, &root.to_string_lossy()).unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(db.list_tracks().unwrap().is_empty());
+        assert!(db.list_scan_roots().unwrap().is_empty());
+        assert!(
+            !cached_path.exists(),
+            "cached artwork must not outlive the scan root it belonged to"
+        );
+    }
+
+    #[test]
+    fn remove_scan_root_and_its_tracks_does_not_touch_a_different_roots_tracks() {
+        let dir = TestDir::new("remove-root-isolated");
+        let cache = dir.path.join("cache");
+        let root_a = dir.path.join("music-a");
+        let root_b = dir.path.join("music-b");
+        fs::create_dir_all(&root_a).unwrap();
+        fs::create_dir_all(&root_b).unwrap();
+        fs::write(root_a.join("a.wav"), build_wav(None, 0.2)).unwrap();
+        fs::write(root_b.join("b.wav"), build_wav(None, 0.2)).unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        scan_root(&db, &cache, &root_a).unwrap();
+        scan_root(&db, &cache, &root_b).unwrap();
+        assert_eq!(db.list_tracks().unwrap().len(), 2);
+
+        let removed =
+            remove_scan_root_and_its_tracks(&db, &cache, &root_a.to_string_lossy()).unwrap();
+
+        assert_eq!(removed, 1);
+        let remaining = db.list_tracks().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0]
+            .path
+            .starts_with(&root_b.to_string_lossy().to_string()));
+        assert_eq!(
+            db.list_scan_roots().unwrap(),
+            vec![root_b.to_string_lossy().to_string()]
+        );
     }
 
     #[test]
