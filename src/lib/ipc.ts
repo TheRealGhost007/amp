@@ -133,7 +133,7 @@ export const player = {
   setPlaybackSpeed: (rate: number) => invoke<void>("player_set_playback_speed", { rate }),
   setCrossfadeDuration: (durationMs: number | null) =>
     invoke<void>("player_set_crossfade_duration", { durationMs }),
-  listDevices: () => invoke<AudioDevice[]>("player_list_devices"),
+  listDevices: () => listOrEmpty<AudioDevice>("player_list_devices"),
   setDevice: (deviceId: string | null) => invoke<void>("player_set_device", { deviceId }),
 };
 

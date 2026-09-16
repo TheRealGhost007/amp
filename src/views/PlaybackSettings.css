@@ -1,0 +1,25 @@
+.op-playback-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-width: 480px;
+}
+
+.op-playback-settings__duration {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-left: var(--space-md);
+}
+
+.op-playback-settings__duration .op-slider {
+  flex: 1;
+}
+
+.op-playback-settings__duration-value {
+  min-width: 3em;
+  text-align: right;
+  font-size: var(--text-caption);
+  font-family: var(--font-numeric);
+  color: var(--fg-muted);
+}

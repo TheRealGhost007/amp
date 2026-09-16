@@ -941,7 +941,7 @@ Two real bugs found by re-reading the new Phase 9 code with fresh eyes.
    playlist the user had just searched for and clicked. The underlying
    cause: `Playlists.tsx`'s "which playlist am I viewing" state was
    view-local (`useState`, following the same pattern as `Artists.tsx`
-   *before* this phase lifted artist-detail selection out for exactly
+   _before_ this phase lifted artist-detail selection out for exactly
    this reason), so nothing outside `Playlists.tsx` had a way to say
    "open playlist X specifically." Fixed the same way View Artist/View
    Album were: added `playlistDetailId`/`viewPlaylist`/
@@ -959,7 +959,7 @@ Two real bugs found by re-reading the new Phase 9 code with fresh eyes.
 **Writes tags by re-running the scan pipeline, not a parallel code
 path.** `player-core/src/metadata_editor.rs`'s `update_track_metadata`
 writes the new tag values to the file with `lofty`, then calls the
-*same* `scan::process_file` the directory walker uses (elevated from
+_same_ `scan::process_file` the directory walker uses (elevated from
 private to `pub(crate)` for this) to re-derive the DB row exactly as a
 fresh scan would. This was a deliberate DRY choice over hand-rolling a
 second artist/album/genre `get_or_create` + artwork-cache path here:
@@ -1001,7 +1001,7 @@ by grep before deciding this). Retrofitting real artwork-path plumbing
 just for this one dialog's "current artwork" preview would be
 new, unreviewed scope well beyond what Phase 10 asks for, so the
 editor shows the same placeholder system for the track's current art.
-A newly-*picked* replacement file also stays a placeholder plus a
+A newly-_picked_ replacement file also stays a placeholder plus a
 "New artwork: <filename>" note rather than a real image thumbnail —
 rendering the actual picked file would need either the Tauri asset
 protocol (a new filesystem-exposure scope decision belonging to a
@@ -1020,7 +1020,7 @@ SQL list, and `row_to_track_list_item_offset` (shifting every
 subsequent field's offset by one, the same mechanical change Phase 9
 made when `artist_id`/`album_id` were added) plus the matching
 TypeScript interface and test fixtures — a reminder that a new
-feature's data needs are worth checking against *all* of a type's
+feature's data needs are worth checking against _all_ of a type's
 existing consumers, not just the ones the new feature touches directly.
 
 **A real focus-stealing bug, caught only by the dialog's own Vitest
@@ -1031,7 +1031,7 @@ plain function defined fresh every render; passed as `Dialog`'s
 any field — each re-run's cleanup returned focus to whatever was
 focused before the dialog opened, then its setup immediately moved
 focus to the panel's first focusable element (the header's close
-button), so only a field's *first* typed character ever landed;
+button), so only a field's _first_ typed character ever landed;
 everything after silently went nowhere. Every other dialog in this app
 (`AddToPlaylistDialog`, `ConfirmDialog`) passes a stable, store-owned
 `close` action straight through as `onClose` and never hit this,
@@ -1064,11 +1064,11 @@ Investigated Omarchy's actual media-key handling before writing anything:
 Hyprland's default keybinds (`/usr/share/omarchy/default/hypr/bindings/media.lua`)
 route `XF86Audio{Play,Pause,Next,Prev}` through `omarchy-shell media
 <action>`, which forwards to Quickshell's built-in `Quickshell.Services.Mpris`
-module — Omarchy's shell already discovers and controls *any* MPRIS
+module — Omarchy's shell already discovers and controls _any_ MPRIS
 player on the session bus. A Wayland client can't grab global hotkeys
 directly anyway (no compositor protocol for it here), and this
 confirms the whole app doesn't need to — implementing MPRIS correctly
-*is* "media key capture" for this desktop. Verified for real: once the
+_is_ "media key capture" for this desktop. Verified for real: once the
 service was running, Quickshell's own top-bar media widget picked it
 up and displayed/controlled it with zero app-side key-binding code.
 
@@ -1076,12 +1076,12 @@ up and displayed/controlled it with zero app-side key-binding code.
 `PlayerInterface` traits, backed by `Arc<Mutex<...>>`, running on
 `src-tauri`'s existing `tauri::async_runtime` — not the crate's
 `!Send`, `Rc`-based `Player` convenience type.** This was a deliberate
-architecture change made *during* this phase after hitting a real,
+architecture change made _during_ this phase after hitting a real,
 fully-reproduced bug with the original design (see below); it is not
 how the phase started. `MprisHandle::update(snapshot)` diffs against
 cached values and only calls `Server::properties_changed` for fields
 that actually changed, avoiding D-Bus chatter on every 200ms tick;
-`Position` is deliberately *not* one of those fields (MPRIS spec:
+`Position` is deliberately _not_ one of those fields (MPRIS spec:
 clients poll it, no `PropertiesChanged` signal) — it's a plain
 `Mutex`-guarded field read directly by the `position()` getter.
 `Next`/`Previous` are forwarded to the frontend as a `mpris-transport`
@@ -1104,17 +1104,17 @@ the first implementation used `mpris-server`'s ready-made `Player`
 running a single-threaded Tokio runtime + `LocalSet` (it can't share a
 multi-threaded runtime). This worked perfectly in isolation — a
 standalone repro with the exact same thread/channel/diff-check
-structure passed cleanly — but broke *silently* the moment a real
+structure passed cleanly — but broke _silently_ the moment a real
 `playbin3`/`pipewiresink` pipeline in the same process reached the
 `Playing` state: `apply_snapshot`'s own same-task readback confirmed
 `player.set_playback_status()`/`set_metadata()` succeeded every single
-tick, yet `busctl get-property`/`playerctl` from *outside* the process
+tick, yet `busctl get-property`/`playerctl` from _outside_ the process
 kept reading the stale initial values (`Stopped`, empty metadata)
 indefinitely, with zero errors logged anywhere. Root-caused via a
 sequence of minimal standalone reproductions (not guesswork): the
-bug did *not* reproduce with `gstreamer::init()` alone, nor with a
+bug did _not_ reproduce with `gstreamer::init()` alone, nor with a
 `GstreamerBackend` merely constructed, nor with a loaded-and-paused
-(prerolled but not streaming) pipeline — only an *actively streaming*
+(prerolled but not streaming) pipeline — only an _actively streaming_
 `play_now()` reproduced it, isolating the trigger precisely to "a real
 GStreamer audio pipeline streaming in the same process as the
 dedicated MPRIS thread's manually-polled `LocalSet`." Rather than work
@@ -1227,7 +1227,7 @@ fresh eyes.
    the Phase 7 section above), just on the Rust side this time. Since
    `apply_snapshot` runs in an independently-scheduled task per call on
    a multi-threaded runtime, a slower, now-superseded snapshot
-   completing *after* a newer one could overwrite fresher
+   completing _after_ a newer one could overwrite fresher
    status/metadata/volume with stale data. No reproduction of this one
    was ever actually observed live (ticks are 200ms apart and
    `apply_snapshot`'s own work is small, so a real reordering is rare),
@@ -1240,6 +1240,164 @@ fresh eyes.
    task), with `apply_snapshot` dropping anything not strictly newer
    than the last-applied sequence. The comparison itself
    (`is_stale`) is a two-line pure function, unit-tested directly.
+
+## Phase 12: keyboard shortcuts, accessibility, settings
+
+**Global shortcut manager**: a single `document`-level `keydown` listener
+(`src/keyboard/GlobalShortcuts.tsx`), not per-component ad-hoc listeners,
+dispatching via a lookup table (`ShortcutId → () => void`) against a
+persisted, rebindable bindings store (`useKeyboardShortcutsStore`,
+`src/store/keyboardShortcutsStore.ts` — same `settings.get/set` key-value
+pattern as every other persisted preference in this app, key
+`keyboard.bindings`). Two guards run before dispatch: `e.defaultPrevented`
+skips the event if a more specific component already claimed it, and a
+bare-letter/Shift+letter combo is suppressed while `document.activeElement`
+is a text-editable element (`isEditableElement` in `src/keyboard/
+shortcuts.ts`) so typing in a search box or the metadata editor doesn't
+trigger transport controls; Ctrl/Alt/Meta-modified combos always fire
+(`hasHardModifier`) since those essentially never produce printable
+characters. The `defaultPrevented` guard relies on DOM event-bubble
+ordering: React's synthetic handlers attach to the root container, a
+`document` descendant, so they run before a native `document`-level
+listener in the bubble phase — verified with a dedicated test that
+registers a real `preventDefault()`-calling listener ahead of
+`GlobalShortcuts`, not assumed from spec knowledge alone, since jsdom/
+Testing Library's `fireEvent` can't set `defaultPrevented` through its
+event-init object (it's a derived, read-only `Event` property — the
+test has to call a real `.preventDefault()`).
+
+**Key mapping** (`src/keyboard/shortcuts.ts`, `SHORTCUT_DEFS`): Space
+(play/pause), ArrowLeft/Right (seek ±10s), ArrowUp/Down (volume ±10%),
+N/P (next/previous track), F (toggle favorite), Ctrl+K (command palette,
+already existed as a hardcoded listener in `CommandPalette.tsx` — moved
+into this table so it participates in the same conflict/rebind system
+as everything else), L/Q (go to Library/Queue), Shift+P (go to
+Playlists — deliberately disambiguated from bare P = previous-track,
+following the master plan's own "L/Q/F/N/P/Shift+P" grouping), and
+Escape (close the full-player overlay). Escape's _rebindable_ action is
+specifically "collapse full player" — every pre-existing per-component
+Escape-to-dismiss behavior (dialogs, menus, popovers) is left as a fixed
+WAI-ARIA convention, not user-rebindable, since remapping "Escape closes
+a modal" would be actively hostile to accessibility rather than a
+customization.
+
+**Reaching state outside the React tree**: `PlayerDock`'s local
+`expanded` boolean was lifted into a new `usePlayerViewStore` (Zustand)
+so `GlobalShortcuts`'s Escape handler can call `usePlayerViewStore
+.getState().collapse()` from outside any component — the same pattern
+already used for `navigationStore` (Phase 9) and the dialog stores
+(Phase 9/10), reused rather than inventing a new mechanism.
+`FullPlayer.tsx`'s own local Escape-key effect was removed now that this
+is centralized.
+
+**Settings UI** (spec §23) filled in four previously-stub sections:
+
+- **Playback**: crossfade toggle + duration slider (1000–12000ms).
+- **Library**: scan-roots list with per-root Remove, "Add Folder…"
+  (reuses `useLibrary().addFolder()`, already real since Phase 3).
+- **Audio**: output-device dropdown (finally wired to
+  `player.listDevices`, real since Phase 4 but never surfaced in any UI
+  until now) and a 10-band EQ. The EQ is laid out as horizontal slider
+  rows rather than vertical faders — a deliberate layout simplification
+  (vertical range inputs have inconsistent, hard-to-restyle track/thumb
+  geometry cross-toolkit, and WebKitGTK is this app's only real target)
+  documented here as a pragmatic scope call, not a functional cut: all
+  10 bands, -24..+12dB range, still fully present and persisted.
+- **Keyboard**: full rebind UI (`KeyboardShortcutsSettings.tsx`), grouped
+  by Playback/Navigation/General, each row showing its current binding
+  as a `kbd`-styled chip with "Change" (captures the next keydown via a
+  capturing-phase listener, Escape cancels, a taken combo shows a toast
+  and leaves the binding unchanged) and "Reset", plus a page-level
+  "Reset all to defaults."
+
+New shared module `src/lib/audioPreferences.ts` centralizes the
+setting keys for output device / EQ bands / crossfade duration and an
+`applyStoredAudioPreferences()` called once from `App.tsx`'s init effect,
+since three independent new Settings sections all need to push their
+persisted value to the audio engine at startup, not just when the user
+touches the control.
+
+"Advanced" (cache management, DB tools, logs, debug mode) is left as the
+sole remaining "upcoming" section — explicitly noted in the UI as
+deferred because there is no backend support for any of it yet (nothing
+to clear, inspect, or toggle), unlike the four sections above which all
+had real backend commands already sitting unused.
+
+**Accessibility pass** found and fixed two real, calculated contrast
+failures rather than eyeballing them:
+
+1. `Toggle`'s "on" thumb (`#fff` fill on the theme's `--accent`
+   background) — computing WCAG 1.4.11's relative-luminance contrast
+   ratio by hand for both shipped themes: the dark theme's
+   `--accent: #e68e0d` against white comes out to ~2.68:1, below the
+   3:1 minimum for non-text UI components; the light theme's
+   `--accent: #a3550a` passes at ~5.44:1. Since the failure is
+   theme-dependent (any future/custom accent color could fail the same
+   way) rather than fixing per-theme colors, the fix adds a fixed
+   `box-shadow: 0 1px 3px rgba(0,0,0,0.5)` to the thumb — a real dark
+   boundary that keeps the thumb's edge (and therefore its position)
+   visible against the track regardless of the exact fill/background
+   contrast underneath.
+2. `CommandPalette`'s search input suppresses its own focus outline for
+   a borderless look, but had never grown a replacement focus
+   indicator — a real WCAG 2.4.7 gap, not just a nice-to-have. Fixed
+   with a `:focus-within` border-bottom on the row (color + width
+   change together, not a hue shift alone, per spec §18/§30's
+   never-color-only-focus-indicator rule).
+
+**Critical bug found during this phase's own on-device verification:
+a full app crash on any frontend-initiated seek while MPRIS was live.**
+Pressing the new ArrowRight seek shortcut produced a real Omarchy
+"Process crashed" desktop notification and a genuine process abort —
+not a recoverable panic — with the exact log text `thread 'tokio-
+runtime-worker' panicked ... there is no reactor running, must be
+called from the context of a Tokio 1.x runtime ... thread caused
+non-unwinding panic. aborting.` Root-caused to the exact line:
+`MprisHandle::notify_seeked` (`crates/linux-integration/src/mpris.rs`)
+called the bare `tokio::spawn` free function, which requires the
+calling thread to already be inside a Tokio runtime worker's own
+ambient thread-local context — true for the tick loop's own task, but
+not true for a synchronous (non-`async fn`) `#[tauri::command]`, which
+Tauri dispatches on a plain thread-pool thread with no such context.
+`player_seek` (a synchronous command) calling `notify_seeked` hit this
+directly. This bug was latent since Phase 11 — the vulnerable code path
+existed since that phase's `notify_seeked` was written — but escaped
+Phase 11's own on-device verification because that verification only
+ever drove seeks _from_ MPRIS (via `busctl`), which runs on a task
+already inside the runtime; a frontend-initiated seek while MPRIS was
+live was never exercised until this phase's keyboard-shortcut testing
+did it by accident. Fixed by capturing a `tokio::runtime::Handle` once,
+at `MprisHandle::spawn()` time (a context guaranteed to have an active
+runtime), storing it on the `Clone`-able `MprisHandle`, and calling
+`self.handle.spawn(...)` instead of the free function in both
+`update()` and `notify_seeked()` — a `Handle` carries its runtime
+reference directly rather than relying on ambient thread-local state,
+so it can be spawned from any thread, sync or async, that holds a
+clone of it. This keeps the `linux-integration` crate's
+never-depend-on-`tauri` boundary intact: `tokio::runtime::Handle` is a
+plain Tokio type, not a Tauri one. Verified the fix by relaunching,
+confirming the same process PID survived multiple consecutive
+ArrowRight/ArrowLeft/ArrowUp presses with zero new panic log lines
+(cross-checked against the pre-fix crash notification, which was
+confirmed stale rather than recurring). **General lesson beyond this
+app**: `tokio::spawn` silently assumes ambient runtime context that a
+synchronous FFI/plugin-dispatched callback (a Tauri sync command here,
+but the same shape applies to any callback invoked by non-Tokio-aware
+host code — a C callback, a GUI toolkit's dispatch thread, etc.) does
+not have; any code that might be invoked from such a context should
+capture and store a `Handle` up front rather than calling the free
+function and assuming a runtime is present.
+
+**Verified fully on-device**, keyboard-only, not from tests alone:
+every shortcut in the mapping above fires correctly and respects the
+text-input guard; Settings > Keyboard's rebind flow (click "Change" via
+Tab+Enter, press a new key, see it persist as the new chip with a
+"Reset" button appearing) and conflict detection (rebinding to an
+already-used combo shows a toast naming the conflicting shortcut and
+leaves the original binding untouched) both work reached purely via Tab
+navigation; Settings > Playback/Library/Audio all render their real
+controls (crossfade toggle, scan-roots list, device dropdown, 10-band
+EQ) correctly end to end.
 
 ## Phase 0 status
 

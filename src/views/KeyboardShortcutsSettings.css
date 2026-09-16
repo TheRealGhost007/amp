@@ -1,0 +1,52 @@
+.op-keyboard-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  max-width: 560px;
+}
+
+.op-keyboard-settings__group-title {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--text-body-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--fg-muted);
+}
+
+.op-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-xs) 0;
+}
+
+.op-shortcut-row__label {
+  font-size: var(--text-body-sm);
+}
+
+.op-shortcut-row__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.op-shortcut-combo {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.op-shortcut-combo--listening {
+  font-size: var(--text-caption);
+  color: var(--accent);
+  padding: 0 var(--space-xs);
+}
+
+.op-shortcut-combo__key {
+  font-family: var(--font-numeric);
+  font-size: var(--text-caption);
+  padding: 2px var(--space-xs);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--fg);
+}

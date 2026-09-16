@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { Dropdown, Toggle } from "../components";
 import { applyTheme, type ThemeMode } from "../lib/theme";
 import { settings } from "../lib/ipc";
+import { AudioSettings } from "./AudioSettings";
+import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
+import { LibrarySettings } from "./LibrarySettings";
+import { PlaybackSettings } from "./PlaybackSettings";
 import { ViewHeader } from "./ViewHeader";
 import "./views.css";
 import "./Settings.css";
@@ -19,11 +23,10 @@ const THEME_SETTING_KEY = "appearance.theme_mode";
 const NOTIFICATIONS_SETTING_KEY = "notifications.track_change_enabled";
 
 const UPCOMING_SECTIONS = [
-  { title: "Playback", note: "Crossfade, replay gain, gapless playback controls." },
-  { title: "Library", note: "Music folders, automatic scanning, rescan controls." },
-  { title: "Audio", note: "Output device and equalizer controls." },
-  { title: "Keyboard", note: "Shortcut customization and Vim mode." },
-  { title: "Advanced", note: "Cache management, database tools, logs, debug mode." },
+  {
+    title: "Advanced",
+    note: "Cache management, database tools, logs, debug mode — no backend support for any of these yet (nothing to clear/inspect/toggle).",
+  },
 ];
 
 export function Settings() {
@@ -78,6 +81,26 @@ export function Settings() {
       </section>
 
       <section className="op-settings-section">
+        <h2 className="op-settings-section__title">Playback</h2>
+        <PlaybackSettings />
+      </section>
+
+      <section className="op-settings-section">
+        <h2 className="op-settings-section__title">Library</h2>
+        <LibrarySettings />
+      </section>
+
+      <section className="op-settings-section">
+        <h2 className="op-settings-section__title">Audio</h2>
+        <AudioSettings />
+      </section>
+
+      <section className="op-settings-section">
+        <h2 className="op-settings-section__title">Keyboard</h2>
+        <KeyboardShortcutsSettings />
+      </section>
+
+      <section className="op-settings-section">
         <h2 className="op-settings-section__title">Notifications</h2>
         <Toggle
           label="Notify on track change"
@@ -93,9 +116,7 @@ export function Settings() {
           className="op-settings-section op-settings-section--upcoming"
         >
           <h2 className="op-settings-section__title">{section.title}</h2>
-          <p className="op-settings-section__note">
-            {section.note} Arrives in a later phase.
-          </p>
+          <p className="op-settings-section__note">{section.note}</p>
         </section>
       ))}
     </div>

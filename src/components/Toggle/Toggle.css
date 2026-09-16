@@ -35,6 +35,12 @@
   height: 18px;
   border-radius: 50%;
   background: var(--fg);
+  /* A flat white-on-accent fill alone measures under the 3:1 minimum
+   * non-text contrast ratio (WCAG 1.4.11) in this theme's "on" accent
+   * color — this shadow draws a real boundary around the thumb so its
+   * edge (and therefore its position) stays visible against the track
+   * regardless of the exact fill-color contrast underneath it. */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   transition: transform var(--motion-fast) var(--ease-out);
 }
 

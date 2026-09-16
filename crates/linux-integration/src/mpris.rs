@@ -256,11 +256,25 @@ impl PlayerInterface for MprisImpl {
 }
 
 /// Handle for pushing state into the running MPRIS service. Cloning is
-/// cheap (an `Arc` clone) so it can live in shared app state alongside
-/// the real player.
+/// cheap (an `Arc` clone plus a `Handle` clone, both cheap reference
+/// copies) so it can live in shared app state alongside the real player.
 #[derive(Clone)]
 pub struct MprisHandle {
     server: Arc<Server<MprisImpl>>,
+    /// Captured once, in `spawn()`, from a context guaranteed to have an
+    /// active Tokio runtime. Deliberately *not* using the bare
+    /// `tokio::spawn` free function in the methods below: that function
+    /// requires the calling thread to already be inside a runtime's own
+    /// worker, which holds for async contexts (the tick loop, the MPRIS
+    /// command loop) but not for a synchronous `#[tauri::command]` fn —
+    /// Tauri dispatches those on a plain thread-pool thread with no
+    /// ambient runtime at all. `player_seek` calling `notify_seeked`
+    /// from exactly such a command hit this for real: "there is no
+    /// reactor running" panics on the main thread, aborting the whole
+    /// process (Rust panics can't unwind across that FFI boundary). A
+    /// `Handle`, once obtained, has no such restriction — `Handle::spawn`
+    /// works from any thread regardless of what's calling it.
+    handle: tokio::runtime::Handle,
 }
 
 impl MprisHandle {
@@ -274,7 +288,7 @@ impl MprisHandle {
     pub fn update(&self, snapshot: PlayerSnapshot) {
         let seq = self.server.imp().next_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let server = self.server.clone();
-        tokio::spawn(async move {
+        self.handle.spawn(async move {
             apply_snapshot(&server, snapshot, seq).await;
         });
     }
@@ -282,10 +296,12 @@ impl MprisHandle {
     /// Emits MPRIS's `Seeked` signal so external clients (a lock-screen
     /// scrubber, another MPRIS-aware widget) notice a position jump
     /// immediately instead of assuming linear playback — call this after
-    /// *any* seek, not just ones MPRIS itself requested.
+    /// *any* seek, not just ones MPRIS itself requested (in particular,
+    /// this is called from the synchronous `player_seek` Tauri command,
+    /// which is exactly the case `handle` above exists to support).
     pub fn notify_seeked(&self, position_ms: u64) {
         let server = self.server.clone();
-        tokio::spawn(async move {
+        self.handle.spawn(async move {
             let _ = server
                 .emit(Signal::Seeked {
                     position: Time::from_millis(position_ms as i64),
@@ -428,6 +444,7 @@ pub async fn spawn(
     Ok((
         MprisHandle {
             server: Arc::new(server),
+            handle: tokio::runtime::Handle::current(),
         },
         command_rx,
     ))

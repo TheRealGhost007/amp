@@ -147,7 +147,7 @@ plan file's existence means work happened.
       already real from Phase 4. "Media-key capture" needed no code —
       Omarchy's Hyprland keybinds already route XF86Audio* keys through
       Quickshell's built-in MPRIS client, so implementing MPRIS
-      correctly *is* the media-key story on this desktop (confirmed:
+      correctly _is_ the media-key story on this desktop (confirmed:
       Quickshell's own media widget picked up the service natively).
       Mid-phase architecture change after a real, fully-reproduced bug:
       the first implementation used `mpris-server`'s `!Send`, `Rc`-based
@@ -163,7 +163,31 @@ plan file's existence means work happened.
       falling through to natural EOS, and a real `Notify` call with
       correct title/subtitle and a genuine resolved artwork path. See
       ARCHITECTURE.md.
-- [ ] **Phase 12 — Keyboard Shortcuts, Accessibility, Settings**.
+- [x] **Phase 12 — Keyboard Shortcuts, Accessibility, Settings**: a
+      single `document`-level global shortcut manager
+      (`GlobalShortcuts.tsx`) dispatches Space/arrows/N/P/F/Ctrl+K/L/Q/
+      Shift+P/Escape against a persisted, rebindable bindings store,
+      deferring to any more-specific component via `e.defaultPrevented`
+      and suppressing bare-letter combos while a text input is focused.
+      Filled in Settings' four remaining stub sections (Playback
+      crossfade, Library scan-roots, Audio device+10-band EQ, Keyboard
+      rebind UI with conflict detection) — "Advanced" is now the only
+      section left, explicitly deferred since it has no backend to
+      wire up yet. Accessibility pass fixed two real, hand-calculated
+      WCAG contrast failures (Toggle's thumb fill, CommandPalette's
+      missing focus indicator). Found and fixed a critical full-app-
+      crash bug during this phase's own on-device testing: a
+      frontend-initiated seek while MPRIS was live called the bare
+      `tokio::spawn` from a synchronous Tauri command's thread-pool
+      thread (no ambient runtime context), aborting the whole process —
+      latent since Phase 11, invisible to that phase's own verification
+      since it only ever drove MPRIS-_initiated_ seeks. Fixed by
+      capturing a `tokio::runtime::Handle` at MPRIS-startup time and
+      spawning through it instead. Verified fully on-device, keyboard-
+      only: every shortcut fires and respects the text-input guard, the
+      rebind/conflict-detection/reset flow works reached purely via Tab
+      navigation, and all four new Settings sections render and persist
+      correctly. See ARCHITECTURE.md.
 - [ ] **Phase 13 — Performance Hardening**: 50k-track fixture profiling.
 - [ ] **Phase 14 — Testing & Build Quality Gate (§36/§38)**.
 - [ ] **Phase 15 — UI/UX Polish Pass + Second Performance Pass**.

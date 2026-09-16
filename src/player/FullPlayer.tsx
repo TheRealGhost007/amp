@@ -1,5 +1,4 @@
 import { motion } from "framer-motion";
-import { useEffect } from "react";
 import { Artwork, Button, Icon, Slider } from "../components";
 import { formatDuration } from "../lib/format";
 import { usePlaybackStore } from "../store/playbackStore";
@@ -22,14 +21,6 @@ export function FullPlayer({ onClose, onOpenQueue }: FullPlayerProps) {
   const seek = usePlaybackStore((s) => s.seek);
   const setVolume = usePlaybackStore((s) => s.setVolume);
   const toggleFavorite = usePlaybackStore((s) => s.toggleFavorite);
-
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   const artworkSeed = track
     ? `${track.artist_name ?? "Unknown Artist"} — ${track.album_title ?? track.title}`

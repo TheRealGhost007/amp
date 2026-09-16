@@ -16,6 +16,7 @@ import { Settings } from "../views/Settings";
 import { PlayerDock } from "../player/PlayerDock";
 import { GlobalDialogs } from "./GlobalDialogs";
 import { CommandPalette } from "../palette/CommandPalette";
+import { GlobalShortcuts } from "../keyboard/GlobalShortcuts";
 import "./Shell.css";
 
 const SIDEBAR_COLLAPSED_KEY = "appearance.sidebar_collapsed";
@@ -73,6 +74,7 @@ export function Shell() {
       <PlayerDock onOpenQueue={() => navigate("queue")} />
       <GlobalDialogs />
       <CommandPalette />
+      <GlobalShortcuts />
     </div>
   );
 }

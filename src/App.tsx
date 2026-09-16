@@ -2,8 +2,10 @@ import { MotionConfig } from "framer-motion";
 import { useEffect } from "react";
 import { ToastProvider } from "./components";
 import { LibraryProvider } from "./context/LibraryContext";
+import { applyStoredAudioPreferences } from "./lib/audioPreferences";
 import { Shell } from "./shell/Shell";
 import { useFavoritesStore } from "./store/favoritesStore";
+import { useKeyboardShortcutsStore } from "./store/keyboardShortcutsStore";
 import { usePlaybackStore } from "./store/playbackStore";
 import { usePlaylistsStore } from "./store/playlistsStore";
 import { useQueueStore } from "./store/queueStore";
@@ -18,6 +20,8 @@ function App() {
     void useQueueStore.getState().init();
     void usePlaylistsStore.getState().init();
     void useFavoritesStore.getState().init();
+    void useKeyboardShortcutsStore.getState().init();
+    void applyStoredAudioPreferences();
     usePlaybackStore
       .getState()
       .init()

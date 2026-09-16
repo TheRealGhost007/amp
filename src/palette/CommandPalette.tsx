@@ -62,17 +62,6 @@ export function CommandPalette() {
   }
 
   useEffect(() => {
-    function handleGlobalKeyDown(e: KeyboardEvent) {
-      if (e.key === "k" && e.ctrlKey) {
-        e.preventDefault();
-        useCommandPaletteStore.getState().toggle();
-      }
-    }
-    document.addEventListener("keydown", handleGlobalKeyDown);
-    return () => document.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
-
-  useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(frame);

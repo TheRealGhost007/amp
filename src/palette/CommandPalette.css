@@ -32,6 +32,16 @@
   flex-shrink: 0;
 }
 
+/* The input itself suppresses its outline (below) for a borderless
+ * look, so the visible focus indicator (spec §18/§30 — never color-only
+ * on its own, but paired here with a border *and* a widened border, not
+ * just a hue shift) moves to this row instead of disappearing. */
+.op-palette__search:focus-within {
+  border-bottom-color: var(--accent);
+  border-bottom-width: 2px;
+  padding-bottom: calc(var(--space-md) - 1px);
+}
+
 .op-palette__input {
   flex: 1;
   background: none;
