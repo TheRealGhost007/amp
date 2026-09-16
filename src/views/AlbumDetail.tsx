@@ -24,7 +24,15 @@ export function AlbumDetail({ albumId }: { albumId: number }) {
     () =>
       tracks
         .filter((t) => t.album_id === albumId)
-        .sort((a, b) => (a.track_number ?? 0) - (b.track_number ?? 0)),
+        // Disc number first, then track number — sorting by track_number
+        // alone would interleave a multi-disc album's tracks (e.g. disc 2
+        // track 1 sorting before disc 1 track 5, since both would compare
+        // as "track 1" vs "track 5" with no disc to break the tie).
+        .sort(
+          (a, b) =>
+            (a.disc_number ?? 0) - (b.disc_number ?? 0) ||
+            (a.track_number ?? 0) - (b.track_number ?? 0),
+        ),
     [tracks, albumId],
   );
 

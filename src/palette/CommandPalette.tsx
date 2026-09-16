@@ -34,6 +34,7 @@ export function CommandPalette() {
   const navigate = useNavigationStore((s) => s.navigate);
   const viewArtist = useNavigationStore((s) => s.viewArtist);
   const viewAlbum = useNavigationStore((s) => s.viewAlbum);
+  const viewPlaylist = useNavigationStore((s) => s.viewPlaylist);
   const playNow = usePlaybackStore((s) => s.playNow);
   const { albums, artists } = useLibrary();
   const playlists = usePlaylistsStore((s) => s.items);
@@ -149,7 +150,7 @@ export function CommandPalette() {
           id: `playlist-${playlist.id}`,
           label: playlist.name,
           icon: "list",
-          onSelect: () => navigate("playlists"),
+          onSelect: () => viewPlaylist(playlist.id),
         }));
       sections.push(playlistItems);
     }
@@ -164,6 +165,7 @@ export function CommandPalette() {
     navigate,
     viewAlbum,
     viewArtist,
+    viewPlaylist,
     playNow,
   ]);
 

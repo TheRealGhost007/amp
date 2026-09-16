@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button, Dialog, EmptyState, Input, MediaRow } from "../components";
 import { useConfirmDialogStore } from "../store/confirmDialogStore";
+import { useNavigationStore } from "../store/navigationStore";
 import { usePlaylistsStore } from "../store/playlistsStore";
 import { PlaylistDetail } from "./PlaylistDetail";
 import { ViewHeader } from "./ViewHeader";
@@ -13,13 +14,18 @@ export function Playlists() {
   const create = usePlaylistsStore((s) => s.create);
   const remove = usePlaylistsStore((s) => s.remove);
   const confirm = useConfirmDialogStore((s) => s.confirm);
+  // Lifted to navigationStore (not view-local) so the command palette's
+  // playlist search results and any future entry point can jump straight
+  // to a specific playlist instead of only ever landing on this list.
+  const selectedId = useNavigationStore((s) => s.playlistDetailId);
+  const viewPlaylist = useNavigationStore((s) => s.viewPlaylist);
+  const backFromPlaylist = useNavigationStore((s) => s.backFromPlaylist);
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
 
   if (selectedId !== null) {
-    return <PlaylistDetail playlistId={selectedId} onBack={() => setSelectedId(null)} />;
+    return <PlaylistDetail playlistId={selectedId} onBack={backFromPlaylist} />;
   }
 
   async function handleCreate() {
@@ -28,7 +34,7 @@ export function Playlists() {
     const id = await create(name);
     setNewName("");
     setCreateOpen(false);
-    setSelectedId(id);
+    viewPlaylist(id);
   }
 
   return (
@@ -63,7 +69,7 @@ export function Playlists() {
                   playlist.description ||
                   `${playlist.track_count} song${playlist.track_count === 1 ? "" : "s"}`
                 }
-                onClick={() => setSelectedId(playlist.id)}
+                onClick={() => viewPlaylist(playlist.id)}
                 actions={[
                   {
                     id: "delete",

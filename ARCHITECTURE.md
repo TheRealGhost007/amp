@@ -906,12 +906,12 @@ accepted-for-now limitation from the Phase 8 bug-hunt pass, which
 explicitly flagged it as needing a real fix "during Phase 9" once
 context menus actually got used everywhere — this is that fix landing.
 The real fix was two-layered: (1) `Popover.tsx` now measures the
-content's *actual* rendered size (`contentRef.current.getBoundingClientRect()`)
+content's _actual_ rendered size (`contentRef.current.getBoundingClientRect()`)
 instead of assuming a fixed width, and clamps against real viewport
 edges on all sides, with a bottom-edge flip-to-top fallback when there
 isn't room below; (2) that measurement is only reliable because
 `Popover.css` now sets `width: max-content` — without it, a freshly-
-mounted popover measured *while still `position: static`* (its state
+mounted popover measured _while still `position: static`_ (its state
 before the positioning effect switches it to `fixed`) reports itself as
 stretched to its containing block's full width (the viewport, since
 it's portaled directly under `<body>`), not its real content width, so
@@ -923,6 +923,36 @@ layout-only bug found this way in this project) — confirmed broken
 before the fix (menu rendered flush against the window's left edge,
 overlapping the sidebar) and correctly clamped within the viewport
 after.
+
+## Post-Phase-9 bug-hunt pass
+
+Two real bugs found by re-reading the new Phase 9 code with fresh eyes.
+
+1. **`AlbumDetail.tsx` sorted tracks by `track_number` alone**, ignoring
+   `disc_number`. Harmless for a single-disc album, but a real multi-disc
+   album would interleave incorrectly — disc 2 track 1 sorting before
+   disc 1 track 5, since nothing broke the tie between two tracks that
+   both happen to be numbered similarly on different discs. Fixed by
+   sorting on `(disc_number, track_number)` instead of `track_number`
+   alone.
+2. **The command palette's playlist search results didn't actually open
+   the matched playlist** — `onSelect: () => navigate("playlists")`
+   always landed on the general playlists list, regardless of which
+   playlist the user had just searched for and clicked. The underlying
+   cause: `Playlists.tsx`'s "which playlist am I viewing" state was
+   view-local (`useState`, following the same pattern as `Artists.tsx`
+   *before* this phase lifted artist-detail selection out for exactly
+   this reason), so nothing outside `Playlists.tsx` had a way to say
+   "open playlist X specifically." Fixed the same way View Artist/View
+   Album were: added `playlistDetailId`/`viewPlaylist`/
+   `backFromPlaylist` to `navigationStore`, migrated `Playlists.tsx` to
+   read/write through the store instead of local state, and pointed the
+   palette's playlist result at `viewPlaylist(playlist.id)`. Verified
+   on-device (store-driven navigation isn't meaningfully different from
+   the already-screenshotted View Artist/Album flows, so verification
+   here checked that `Playlists.tsx` correctly renders `PlaylistDetail`
+   when `navigationStore.playlistDetailId` is set from outside the
+   view, which is the part that actually changed).
 
 ## Phase 0 status
 
