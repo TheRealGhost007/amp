@@ -56,7 +56,20 @@ impl NowPlayingTracker {
         if cached_id == track_id {
             return false;
         }
-        self.cached = track_id.and_then(|id| Self::load(db, cache_dir, id));
+        // A DB lookup failure (the track was removed from the library
+        // mid-playback, or a transient error) must not make this look
+        // like "nothing is playing" — the player itself still reports a
+        // real `track_id`, so the snapshot must too, with a generic
+        // fallback title rather than silently reporting `None`.
+        self.cached = track_id.map(|id| {
+            Self::load(db, cache_dir, id).unwrap_or_else(|| CachedTrack {
+                id,
+                title: "Unknown Track".to_string(),
+                artist: None,
+                album: None,
+                art_path: None,
+            })
+        });
         track_id.is_some()
     }
 
@@ -189,5 +202,27 @@ mod tests {
         let tracker = NowPlayingTracker::new();
         let snapshot = tracker.snapshot(0, None, PlaybackState::Stopped, 1.0);
         assert_eq!(snapshot.track_id, None);
+    }
+
+    #[test]
+    fn a_track_id_the_database_no_longer_has_still_reports_a_track_id() {
+        // Regression test: if a track is removed from the library (or a
+        // DB lookup otherwise fails) while it's still the one actually
+        // playing — a real scenario, "Remove From Library" works on the
+        // currently-playing track — the resulting snapshot must not
+        // silently look like "nothing is playing" (track_id: None). An
+        // MPRIS client watching PlaybackStatus=Playing with an empty
+        // Metadata/no trackid is confusing at best; falling back to a
+        // generic title while still reporting the real track id is
+        // consistent with what the player is actually doing.
+        let db = Database::open_in_memory().unwrap();
+        let mut tracker = NowPlayingTracker::new();
+
+        let notified = tracker.refresh_if_changed(&db, Path::new("/tmp"), Some(999));
+
+        assert!(notified);
+        let snapshot = tracker.snapshot(0, None, PlaybackState::Playing, 1.0);
+        assert_eq!(snapshot.track_id, Some(999));
+        assert!(!snapshot.title.is_empty());
     }
 }

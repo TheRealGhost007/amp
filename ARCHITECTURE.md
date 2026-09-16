@@ -1196,6 +1196,51 @@ existing natural-EOS handling; and a `Notify` D-Bus call fires with the
 correct title/subtitle/icon on every track change, including a real
 resolved artwork file path for the embedded-art fixture.
 
+## Post-Phase-11 bug-hunt pass
+
+Two real bugs found re-reading the new MPRIS/notification code with
+fresh eyes.
+
+1. **A track removed from the library while it's the one actually
+   playing made MPRIS look like nothing was playing.**
+   `NowPlayingTracker::refresh_if_changed` looked up the new track's
+   display fields via `Database::get_track_for_browse`/`get_track`,
+   and on a lookup failure (row gone — a real case, "Remove From
+   Library" already works on the currently-playing track; also any
+   transient DB error) fell back to `self.cached = None`. That made the
+   MPRIS snapshot report `track_id: None` and empty `Metadata` while
+   `PlaybackStatus` still correctly said `Playing` (computed separately,
+   straight from `audio_engine::Player`, which has no idea the DB row
+   is gone) — an external MPRIS client would see "Playing" with no
+   track info at all, and the app's own notification logic would
+   silently skip firing. Fixed by falling back to a synthetic
+   `CachedTrack` (`title: "Unknown Track"`, id preserved) instead of
+   `None` whenever a `Some(track_id)` fails to load — the snapshot now
+   stays internally consistent (a real track id, a real `Playing`
+   status, and a generic fallback title) rather than contradicting
+   itself. Caught with a regression test that requests a `track_id`
+   the in-memory `Database` never had and asserts the snapshot still
+   carries that id.
+2. **`MprisHandle::update`'s fire-and-forget `tokio::spawn` per tick had
+   no ordering guarantee** — the exact class of bug already fixed once
+   in this codebase for `playbackStore`'s track/favorite updates (see
+   the Phase 7 section above), just on the Rust side this time. Since
+   `apply_snapshot` runs in an independently-scheduled task per call on
+   a multi-threaded runtime, a slower, now-superseded snapshot
+   completing *after* a newer one could overwrite fresher
+   status/metadata/volume with stale data. No reproduction of this one
+   was ever actually observed live (ticks are 200ms apart and
+   `apply_snapshot`'s own work is small, so a real reordering is rare),
+   but the failure mode — an external MPRIS client transiently showing
+   wrong Playing/Paused or stale metadata — is exactly the shape this
+   project has already hit and fixed once, so it was worth closing
+   defensively rather than waiting to reproduce it under load. Fixed
+   with the same technique as the frontend fix: a monotonic sequence
+   number assigned at `update()`-call time (not inside the spawned
+   task), with `apply_snapshot` dropping anything not strictly newer
+   than the last-applied sequence. The comparison itself
+   (`is_stale`) is a two-line pure function, unit-tested directly.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

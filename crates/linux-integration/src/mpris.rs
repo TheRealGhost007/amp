@@ -36,6 +36,7 @@ use mpris_server::{
     Signal, Time, TrackId, Volume,
 };
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
@@ -92,12 +93,22 @@ struct SharedState {
     position_ms: u64,
     can_go_next: bool,
     can_go_previous: bool,
+    /// Sequence number of the last-applied snapshot — `update()` spawns
+    /// a short-lived task per call rather than awaiting inline (see its
+    /// own doc comment), and a multi-threaded runtime gives no guarantee
+    /// those tasks complete in the order they were spawned. Without this
+    /// guard, an older, now-superseded snapshot completing *after* a
+    /// newer one could overwrite fresher state with stale data — the
+    /// same class of bug already fixed once for `playbackStore`'s own
+    /// track/favorite updates (see ARCHITECTURE.md's Phase 7 section).
+    applied_seq: u64,
 }
 
 struct MprisImpl {
     identity: String,
     state: Mutex<SharedState>,
     command_tx: UnboundedSender<PlayerCommand>,
+    next_seq: AtomicU64,
 }
 
 impl RootInterface for MprisImpl {
@@ -256,11 +267,15 @@ impl MprisHandle {
     /// Pushes a new snapshot, spawning a short-lived task to apply it —
     /// [`Server::properties_changed`] is async, but callers (the 200ms
     /// tick loop) call this from a synchronous section holding other
-    /// locks, so the actual D-Bus work happens after this returns.
+    /// locks, so the actual D-Bus work happens after this returns. The
+    /// sequence number assigned here (not inside the spawned task) is
+    /// what lets `apply_snapshot` detect and drop a stale, out-of-order
+    /// completion — see `SharedState::applied_seq`.
     pub fn update(&self, snapshot: PlayerSnapshot) {
+        let seq = self.server.imp().next_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let server = self.server.clone();
         tokio::spawn(async move {
-            apply_snapshot(&server, snapshot).await;
+            apply_snapshot(&server, snapshot, seq).await;
         });
     }
 
@@ -278,6 +293,14 @@ impl MprisHandle {
                 .await;
         });
     }
+}
+
+/// `true` when `seq` is not newer than the last-applied sequence number
+/// — i.e. some other, later-numbered snapshot has already been applied,
+/// so this one arrived out of order and must be dropped rather than
+/// overwrite fresher state with stale data.
+fn is_stale(seq: u64, applied_seq: u64) -> bool {
+    seq <= applied_seq
 }
 
 fn playback_status(state: PlaybackState) -> PlaybackStatus {
@@ -329,7 +352,7 @@ fn build_metadata(snapshot: &PlayerSnapshot) -> Metadata {
     builder.build()
 }
 
-async fn apply_snapshot(server: &Server<MprisImpl>, snapshot: PlayerSnapshot) {
+async fn apply_snapshot(server: &Server<MprisImpl>, snapshot: PlayerSnapshot, seq: u64) {
     let status = playback_status(snapshot.state);
     let metadata = build_metadata(&snapshot);
     let has_track = snapshot.track_id.is_some();
@@ -337,6 +360,13 @@ async fn apply_snapshot(server: &Server<MprisImpl>, snapshot: PlayerSnapshot) {
     let mut changed = Vec::new();
     {
         let mut state = server.imp().state.lock().unwrap();
+        if is_stale(seq, state.applied_seq) {
+            // A newer snapshot already applied while this one was
+            // waiting to be scheduled — dropping it here is exactly
+            // equivalent to it never having raced in the first place.
+            return;
+        }
+        state.applied_seq = seq;
         if state.playback_status != status {
             state.playback_status = status;
             changed.push(mpris_server::Property::PlaybackStatus(status));
@@ -387,8 +417,10 @@ pub async fn spawn(
             position_ms: 0,
             can_go_next: false,
             can_go_previous: false,
+            applied_seq: 0,
         }),
         command_tx,
+        next_seq: AtomicU64::new(0),
     };
     let server = Server::new(bus_name_suffix, imp)
         .await
@@ -404,6 +436,20 @@ pub async fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_stale_rejects_a_sequence_number_that_is_not_newer() {
+        assert!(is_stale(1, 5), "an older snapshot arriving late is stale");
+        assert!(
+            is_stale(5, 5),
+            "a duplicate of the last-applied one is stale"
+        );
+    }
+
+    #[test]
+    fn is_stale_accepts_a_strictly_newer_sequence_number() {
+        assert!(!is_stale(6, 5));
+    }
 
     #[test]
     fn playback_status_maps_buffering_to_playing_since_mpris_has_no_such_state() {
