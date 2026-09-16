@@ -13,7 +13,7 @@ use crate::error::Result;
 use std::collections::HashMap;
 
 const TRACK_LIST_ITEM_COLUMNS: &str = "
-    t.id, t.path, t.title, ar.name, al.title, g.name,
+    t.id, t.path, t.title, t.artist_id, ar.name, t.album_id, al.title, g.name,
     t.track_number, t.disc_number, t.duration_ms, t.year,
     t.has_embedded_art, t.added_at";
 
@@ -82,11 +82,28 @@ impl Database {
     /// against the ranked id list from [`Database::search_tracks`]).
     pub fn search_tracks_for_browse(&self, query: &str, limit: i64) -> Result<Vec<TrackListItem>> {
         let ranked_ids = self.search_tracks(query, limit)?;
-        if ranked_ids.is_empty() {
+        self.tracks_by_ids_in_order(&ranked_ids)
+    }
+
+    /// Most recently played tracks, joined to display-ready fields,
+    /// newest first.
+    pub fn list_recently_played_for_browse(&self, limit: i64) -> Result<Vec<TrackListItem>> {
+        let ranked_ids = self.recently_played_track_ids(limit)?;
+        self.tracks_by_ids_in_order(&ranked_ids)
+    }
+
+    /// Joins `ids` back to display-ready rows, preserving `ids`' own
+    /// order — the `IN (...)` clause SQLite would use here does not
+    /// preserve caller-supplied order, so results are re-sorted in Rust.
+    /// Shared by any query that starts from a ranked/ordered id list
+    /// (full-text search relevance, recently-played recency) rather than
+    /// an orderable SQL column.
+    fn tracks_by_ids_in_order(&self, ids: &[i64]) -> Result<Vec<TrackListItem>> {
+        if ids.is_empty() {
             return Ok(Vec::new());
         }
 
-        let placeholders = ranked_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
             "SELECT {TRACK_LIST_ITEM_COLUMNS}
              FROM tracks t
@@ -96,10 +113,8 @@ impl Database {
              WHERE t.id IN ({placeholders})"
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::ToSql> = ranked_ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::ToSql)
-            .collect();
+        let params: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
         let rows = stmt.query_map(params.as_slice(), Self::row_to_track_list_item)?;
         let by_id: HashMap<i64, TrackListItem> = rows
             .collect::<rusqlite::Result<Vec<_>>>()?
@@ -107,10 +122,7 @@ impl Database {
             .map(|item| (item.id, item))
             .collect();
 
-        Ok(ranked_ids
-            .into_iter()
-            .filter_map(|id| by_id.get(&id).cloned())
-            .collect())
+        Ok(ids.iter().filter_map(|id| by_id.get(id).cloned()).collect())
     }
 
     /// The queue, joined to display-ready track fields, in position
@@ -199,15 +211,17 @@ impl Database {
             id: row.get(offset)?,
             path: row.get(offset + 1)?,
             title: row.get(offset + 2)?,
-            artist_name: row.get(offset + 3)?,
-            album_title: row.get(offset + 4)?,
-            genre_name: row.get(offset + 5)?,
-            track_number: row.get(offset + 6)?,
-            disc_number: row.get(offset + 7)?,
-            duration_ms: row.get(offset + 8)?,
-            year: row.get(offset + 9)?,
-            has_embedded_art: row.get(offset + 10)?,
-            added_at: row.get(offset + 11)?,
+            artist_id: row.get(offset + 3)?,
+            artist_name: row.get(offset + 4)?,
+            album_id: row.get(offset + 5)?,
+            album_title: row.get(offset + 6)?,
+            genre_name: row.get(offset + 7)?,
+            track_number: row.get(offset + 8)?,
+            disc_number: row.get(offset + 9)?,
+            duration_ms: row.get(offset + 10)?,
+            year: row.get(offset + 11)?,
+            has_embedded_art: row.get(offset + 12)?,
+            added_at: row.get(offset + 13)?,
         })
     }
 }
@@ -260,6 +274,18 @@ mod tests {
         assert_eq!(tracks[0].path, "/a.flac");
         assert_eq!(tracks[0].artist_name, Some("Daft Punk".to_string()));
         assert_eq!(tracks[0].album_title, Some("Discovery".to_string()));
+        assert!(
+            tracks[0].artist_id.is_some(),
+            "needed to navigate to View Artist"
+        );
+        assert!(
+            tracks[0].album_id.is_some(),
+            "needed to navigate to View Album"
+        );
+        assert_eq!(
+            tracks[0].artist_id, tracks[1].artist_id,
+            "same artist on both tracks"
+        );
         assert_eq!(tracks[1].title, "Zebra");
     }
 
@@ -362,5 +388,21 @@ mod tests {
         assert_eq!(items[0].track.title, "Aardvark");
         assert_eq!(items[1].id, row_b);
         assert_eq!(items[1].track.title, "Zebra");
+    }
+
+    #[test]
+    fn list_recently_played_for_browse_is_deduplicated_newest_first_and_joined() {
+        let db = Database::open_in_memory().unwrap();
+        let a = insert_full_track(&db, "/a.flac", "One", "Daft Punk", "Discovery");
+        let b = insert_full_track(&db, "/b.flac", "Two", "Daft Punk", "Discovery");
+        db.record_played(a, 1).unwrap();
+        db.record_played(b, 2).unwrap();
+        db.record_played(a, 3).unwrap(); // a played again, more recently
+
+        let recent = db.list_recently_played_for_browse(10).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].title, "One");
+        assert_eq!(recent[0].artist_name, Some("Daft Punk".to_string()));
+        assert_eq!(recent[1].title, "Two");
     }
 }

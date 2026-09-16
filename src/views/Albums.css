@@ -6,6 +6,18 @@
 .op-album-tile {
   width: 168px;
   flex-shrink: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-container);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.op-album-tile:hover .op-album-tile__title {
+  color: var(--accent);
 }
 
 .op-album-tile__title {

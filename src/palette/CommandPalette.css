@@ -1,0 +1,120 @@
+.op-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  justify-content: center;
+  padding-top: 15vh;
+  background: rgba(0, 0, 0, 0.5);
+  animation: op-palette-backdrop-in var(--motion-fast) var(--ease-out);
+}
+
+.op-palette {
+  width: min(560px, calc(100vw - var(--space-xl)));
+  max-height: min(420px, calc(100vh - 20vh));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-container);
+  box-shadow: var(--shadow-overlay);
+  overflow: hidden;
+  animation: op-palette-in var(--motion-base) var(--ease-out);
+}
+
+.op-palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.op-palette__input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font-size: var(--text-body);
+}
+
+.op-palette__input::placeholder {
+  color: var(--fg-dim);
+}
+
+.op-palette__kbd {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  font-family: var(--font-numeric);
+  font-size: var(--text-caption);
+  color: var(--fg-dim);
+}
+
+.op-palette__list {
+  overflow-y: auto;
+  padding: var(--space-xs);
+}
+
+.op-palette__empty {
+  margin: 0;
+  padding: var(--space-lg);
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: var(--text-body-sm);
+}
+
+.op-palette__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-control);
+  color: inherit;
+  text-align: left;
+  font-size: var(--text-body-sm);
+  cursor: pointer;
+}
+
+.op-palette__item--active {
+  background: var(--bg-dim);
+}
+
+.op-palette__item-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.op-palette__item-sublabel {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-caption);
+}
+
+@keyframes op-palette-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes op-palette-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .op-palette-backdrop,
+  .op-palette {
+    animation: none;
+  }
+}

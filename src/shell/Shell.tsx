@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { Sidebar } from "./Sidebar";
 import type { ViewId } from "./views";
 import { settings } from "../lib/ipc";
+import { useNavigationStore } from "../store/navigationStore";
 import { Home } from "../views/Home";
 import { Library } from "../views/Library";
 import { Albums } from "../views/Albums";
@@ -13,6 +14,8 @@ import { Queue } from "../views/Queue";
 import { Downloads } from "../views/Downloads";
 import { Settings } from "../views/Settings";
 import { PlayerDock } from "../player/PlayerDock";
+import { GlobalDialogs } from "./GlobalDialogs";
+import { CommandPalette } from "../palette/CommandPalette";
 import "./Shell.css";
 
 const SIDEBAR_COLLAPSED_KEY = "appearance.sidebar_collapsed";
@@ -31,7 +34,8 @@ const VIEWS: Record<ViewId, ComponentType> = {
 };
 
 export function Shell() {
-  const [activeView, setActiveView] = useState<ViewId>("home");
+  const activeView = useNavigationStore((s) => s.activeView);
+  const navigate = useNavigationStore((s) => s.navigate);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -59,14 +63,16 @@ export function Shell() {
         <Sidebar
           activeView={activeView}
           collapsed={collapsed}
-          onNavigate={setActiveView}
+          onNavigate={navigate}
           onToggleCollapsed={toggleCollapsed}
         />
         <main className="op-shell__main">
           <ActiveView />
         </main>
       </div>
-      <PlayerDock onOpenQueue={() => setActiveView("queue")} />
+      <PlayerDock onOpenQueue={() => navigate("queue")} />
+      <GlobalDialogs />
+      <CommandPalette />
     </div>
   );
 }

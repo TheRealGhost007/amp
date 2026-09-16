@@ -46,7 +46,9 @@ export interface TrackListItem {
   id: number;
   path: string;
   title: string;
+  artist_id: number | null;
   artist_name: string | null;
+  album_id: number | null;
   album_title: string | null;
   genre_name: string | null;
   track_number: number | null;
@@ -155,6 +157,12 @@ export const library = {
   listAlbums: () => listOrEmpty<AlbumSummary>("library_list_albums"),
   listArtists: () => listOrEmpty<ArtistSummary>("library_list_artists"),
   search: (query: string) => listOrEmpty<TrackListItem>("library_search", { query }),
+  removeTrack: (trackId: number) => invoke<void>("library_remove_track", { trackId }),
+};
+
+export const history = {
+  recordPlayed: (trackId: number) => invoke<void>("history_record_played", { trackId }),
+  listRecent: () => listOrEmpty<TrackListItem>("history_list_recent"),
 };
 
 export const favorites = {

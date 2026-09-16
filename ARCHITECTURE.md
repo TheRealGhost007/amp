@@ -819,6 +819,111 @@ the same try/catch; verified with a regression test (mocking
 `player.setNext` to reject) confirmed to fail without the fix and pass
 with it.
 
+## Phase 9: command palette and context menus
+
+**One shared context-menu builder, not per-view menus.** `lib/trackMenu.ts`'s
+`buildTrackMenuItems(track, options)` is a plain function (not a hook —
+called per-row inside a `.map()`) that assembles the full, contextually
+correct entry list for any song row: Play, Play Next, Add to Queue, Add
+to Playlist, Favorite/Unfavorite, View Artist (if the track has one),
+View Album (if it has one), Copy Info, Open File Location, and Remove
+From Library — reusing Phase 1's `Menu`/`Popover` rather than building
+new menu UI. Every view that lists tracks (Library, Queue, playlist
+detail, the new Favorites and Recently Played views, Artist/Album
+detail) calls it, passing an `extraItems` list for whatever's specific
+to that view (e.g. "Remove from Queue") and an `onRemovedFromLibrary`
+callback so the calling view refreshes whatever it's displaying — there
+is no single global cache this builder could refresh on every view's
+behalf (Library's `LibraryContext`, `queueStore`, and a playlist
+detail's local track list are all independent), so each view stays
+responsible for its own refresh. Two new global, store-driven dialogs
+(`addToPlaylistDialogStore`, `confirmDialogStore`) back the two actions
+that need a dialog, each mounted exactly once (`Shell.tsx`'s new
+`GlobalDialogs`) instead of every view owning its own dialog instance.
+
+**"View Artist"/"View Album" needed real detail views to navigate to,
+not just a menu label** — Phase 6 had explicitly deferred these
+("Album tiles and Artist rows are display-only ... a better fit for
+the album/artist detail pages a later phase should build"). Built
+`ArtistDetail.tsx`/`AlbumDetail.tsx` now: both filter the already-loaded
+`LibraryContext.tracks` client-side by the track's `artist_id`/
+`album_id` (added to `TrackListItem` this phase — trivial columns
+already on `tracks`, no new join needed) rather than adding new backend
+queries, consistent with Phase 6's "fetch the whole list once" approach.
+Navigating to one from anywhere (not just from inside Albums/Artists
+itself) needed lifting view-switching out of `Shell.tsx`'s local
+`useState` into a new `navigationStore` (Zustand) — `Playlists.tsx`'s
+own detail-selection state stays view-local by contrast, since nothing
+outside Playlists ever needs to jump straight to one.
+
+**Command palette** (`palette/CommandPalette.tsx`, Ctrl+K): a static
+navigation-command registry (from the existing `SIDEBAR_ITEMS` list)
+plus live search over tracks (the Phase 6 FTS5 backend, debounced) and
+client-side substring matches over albums/artists/playlists (already
+loaded, so no new backend query for those three). No new dependency —
+substring matching plus a short, curated per-group result list is
+sufficient at this library scale; a real fuzzy-match algorithm can
+replace it later without changing the surrounding structure if it ever
+proves insufficient.
+
+**New backend**: `TrackListItem` gained `artist_id`/`album_id` (needed
+for View Artist/Album). `library_remove_track` (Remove From Library —
+cascades to favorites/queue/playlist_tracks/playback_history via the
+schema's existing `ON DELETE CASCADE`, so no extra frontend cleanup
+queries are needed beyond each view refreshing its own visible list).
+`history_record_played`/`history_list_recent` finally give the Phase 2
+`playback_history` table a real caller — `playbackStore` records a play
+on every `playNow`/`TrackAdvanced`, best-effort (a failed write must
+never block playback, matching the `fetchFavoriteStatus`/
+`syncNextWithBackend` precedent). `list_recently_played_for_browse` and
+`search_tracks_for_browse` now share one `tracks_by_ids_in_order`
+helper — both start from a ranked/ordered id list that a plain SQL
+`ORDER BY` can't reproduce through an `IN (...)` clause, so both need
+the same "join back, then re-sort in Rust to match the id list" fix.
+
+**Deliberately out of scope for this phase**: no "Edit Metadata" menu
+entry — Phase 10 owns the actual metadata-editor infrastructure
+(validation, path-traversal checks against configured library roots
+per spec §37, the destructive-write confirmation), and a menu entry
+with nothing real to open would be exactly the kind of placeholder this
+project's rules forbid. No bulk album/artist-level context menu (Play
+whole album, queue whole album, ...) — Albums/Artists tiles gained real
+click-through navigation instead of doing nothing (their actual prior
+state), which is the more valuable and more clearly-in-scope fix; a
+bulk-actions menu is a natural fast-follow once this phase's menu
+infrastructure exists, not something the stated exit criteria
+("every media row opens the same context-menu component") strictly
+requires reading as covering non-song rows too.
+
+**Real bug, reported live by the user while this phase was still being
+verified, and root-caused via on-device screenshots**: `Popover.tsx`
+(shared by every `Menu`) computed its position using
+`window.innerWidth - 240` — a hardcoded guess at the menu's width, fine
+for Phase 1's short dropdowns but wrong the moment Phase 9 put a
+10-item, much wider menu behind it, so a menu opened near the right
+edge could render mostly off-screen. This was already a documented,
+accepted-for-now limitation from the Phase 8 bug-hunt pass, which
+explicitly flagged it as needing a real fix "during Phase 9" once
+context menus actually got used everywhere — this is that fix landing.
+The real fix was two-layered: (1) `Popover.tsx` now measures the
+content's *actual* rendered size (`contentRef.current.getBoundingClientRect()`)
+instead of assuming a fixed width, and clamps against real viewport
+edges on all sides, with a bottom-edge flip-to-top fallback when there
+isn't room below; (2) that measurement is only reliable because
+`Popover.css` now sets `width: max-content` — without it, a freshly-
+mounted popover measured *while still `position: static`* (its state
+before the positioning effect switches it to `fixed`) reports itself as
+stretched to its containing block's full width (the viewport, since
+it's portaled directly under `<body>`), not its real content width, so
+even a "measure the real DOM" fix silently produces the same wrong
+answer without the CSS half of the fix. Verified via the established
+on-device screenshot technique (jsdom cannot catch a bug this
+CSS-positioning-specific either, per the same lesson as every other
+layout-only bug found this way in this project) — confirmed broken
+before the fix (menu rendered flush against the window's left edge,
+overlapping the sidebar) and correctly clamped within the viewport
+after.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

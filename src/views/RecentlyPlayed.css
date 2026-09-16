@@ -1,0 +1,5 @@
+.op-recently-played__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+}

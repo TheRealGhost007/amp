@@ -2,6 +2,8 @@ import { useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { EmptyState, MediaRow } from "../components";
 import { useLibrary } from "../context/LibraryContext";
+import { useNavigationStore } from "../store/navigationStore";
+import { ArtistDetail } from "./ArtistDetail";
 import { ViewHeader } from "./ViewHeader";
 import "./views.css";
 import "./Library.css";
@@ -10,6 +12,8 @@ const ROW_HEIGHT = 56;
 
 export function Artists() {
   const { artists, loading } = useLibrary();
+  const artistDetailId = useNavigationStore((s) => s.artistDetailId);
+  const viewArtist = useNavigationStore((s) => s.viewArtist);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const rowVirtualizer = useVirtualizer({
@@ -18,6 +22,10 @@ export function Artists() {
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
   });
+
+  if (artistDetailId !== null) {
+    return <ArtistDetail artistId={artistDetailId} />;
+  }
 
   if (!loading && artists.length === 0) {
     return (
@@ -59,6 +67,7 @@ export function Artists() {
                   title={artist.name}
                   subtitle={`${artist.album_count} album${artist.album_count === 1 ? "" : "s"}`}
                   trailing={`${artist.track_count} song${artist.track_count === 1 ? "" : "s"}`}
+                  onClick={() => viewArtist(artist.id)}
                 />
               </div>
             );

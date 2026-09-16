@@ -14,8 +14,11 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { Button, Card, EmptyState, MediaRow, SortableRow } from "../components";
+import { useLibrary } from "../context/LibraryContext";
 import { pathToFileUri } from "../lib/ipc";
+import { buildTrackMenuItems } from "../lib/trackMenu";
 import { useNowPlaying } from "../player/useNowPlaying";
+import { useFavoritesStore } from "../store/favoritesStore";
 import { usePlaybackStore } from "../store/playbackStore";
 import { useQueueStore } from "../store/queueStore";
 import { ViewHeader } from "./ViewHeader";
@@ -30,6 +33,9 @@ export function Queue() {
   const removeFromQueue = useQueueStore((s) => s.remove);
   const reorderQueue = useQueueStore((s) => s.reorder);
   const clearQueue = useQueueStore((s) => s.clear);
+  const favoriteIds = useFavoritesStore((s) => s.ids);
+  const toggleFavorite = useFavoritesStore((s) => s.toggle);
+  const refreshLibrary = useLibrary().refresh;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -105,6 +111,8 @@ export function Queue() {
                       artworkSeed={`${item.track.artist_name ?? "Unknown Artist"} — ${item.track.album_title ?? item.track.title}`}
                       title={item.track.title}
                       subtitle={item.track.artist_name ?? "Unknown Artist"}
+                      favorite={favoriteIds.has(item.track.id)}
+                      onToggleFavorite={() => void toggleFavorite(item.track.id)}
                       onClick={() => {
                         // Clicking a queued track jumps straight to it and
                         // takes it out of the queue (it's playing now, not
@@ -117,13 +125,19 @@ export function Queue() {
                           }),
                         );
                       }}
-                      actions={[
-                        {
-                          id: "remove",
-                          label: "Remove from Queue",
-                          onSelect: () => void removeFromQueue(item.id),
+                      actions={buildTrackMenuItems(item.track, {
+                        extraItems: [
+                          {
+                            id: "remove",
+                            label: "Remove from Queue",
+                            onSelect: () => void removeFromQueue(item.id),
+                          },
+                        ],
+                        onRemovedFromLibrary: () => {
+                          void refreshLibrary();
+                          void useQueueStore.getState().init();
                         },
-                      ]}
+                      })}
                     />
                   </SortableRow>
                 ))}

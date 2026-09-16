@@ -97,7 +97,30 @@ plan file's existence means work happened.
       way (Queue's empty-state gating condition; a render-time parent
       setState call racing playlistsStore's initial load) — see
       ARCHITECTURE.md.
-- [ ] **Phase 9 — Command Palette & Context Menus**.
+- [x] **Phase 9 — Command Palette & Context Menus**: one shared
+      `buildTrackMenuItems` builder (Play/Play Next/Add to Queue/Add to
+      Playlist/Favorite/View Artist/View Album/Copy Info/Open File
+      Location/Remove From Library) used by every track-listing view —
+      Library, Queue, playlist detail, and the newly real Favorites and
+      Recently Played views (both previously permanent empty states).
+      New `ArtistDetail`/`AlbumDetail` views (filtering already-loaded
+      library data client-side) give "View Artist"/"View Album"
+      somewhere real to navigate to, via a new `navigationStore` lifted
+      out of `Shell.tsx`'s local view-switching state. Ctrl+K command
+      palette: static navigation commands plus live FTS5 track search
+      and client-side album/artist/playlist matching. Two new global
+      dialog stores back Add-to-Playlist/Confirm everywhere instead of
+      per-view dialog instances. "Edit Metadata" deliberately omitted
+      (Phase 10's job); no bulk album/artist-level menu (their tiles
+      gained real click-through navigation instead). Verified on-device
+      with a real scanned library, favorites, and play history. Caught
+      and fixed a real bug reported live by the user mid-phase: a
+      `Popover` positioning assumption (`window.innerWidth - 240`,
+      fine for Phase 1's short dropdowns) broke once this phase's much
+      wider context menu used it, rendering off-screen near the right
+      edge — already flagged as a known limitation in the Phase 8
+      bug-hunt pass specifically pending this phase. See
+      ARCHITECTURE.md.
 - [ ] **Phase 10 — Metadata Editor & Artwork Editing**.
 - [ ] **Phase 11 — Linux/Omarchy Integration**: MPRIS, media keys,
       notifications, PipeWire device switching.

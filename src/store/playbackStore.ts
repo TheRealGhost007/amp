@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   favorites,
+  history,
   onPlayerEvent,
   onPlayerPosition,
   pathToFileUri,
@@ -100,6 +101,9 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => {
           : state.history,
     }));
     void useQueueStore.getState().syncNext();
+    // Best-effort: a failed history write should never block playback
+    // itself, so it's neither awaited nor allowed to throw.
+    history.recordPlayed(track.id).catch(() => {});
     const favSeq = ++favoriteSeq;
     const isFavorite = await fetchFavoriteStatus(track);
     if (favSeq === favoriteSeq) set({ isFavorite });
@@ -169,6 +173,9 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => {
             // with as `next` (see queueStore's doc comment) — remove it
             // from the persisted queue and arm the new head.
             void useQueueStore.getState().consumeHead();
+            if (status.current_track) {
+              history.recordPlayed(status.current_track.id).catch(() => {});
+            }
             break;
           }
           case "PlaybackFinished":

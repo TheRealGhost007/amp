@@ -16,7 +16,6 @@ import {
 } from "@dnd-kit/sortable";
 import {
   Button,
-  ConfirmDialog,
   Dialog,
   EmptyState,
   Icon,
@@ -24,11 +23,15 @@ import {
   MediaRow,
   SortableRow,
 } from "../components";
+import { useLibrary } from "../context/LibraryContext";
 import {
   pathToFileUri,
   playlists as playlistsApi,
   type PlaylistTrackItem,
 } from "../lib/ipc";
+import { buildTrackMenuItems } from "../lib/trackMenu";
+import { useConfirmDialogStore } from "../store/confirmDialogStore";
+import { useFavoritesStore } from "../store/favoritesStore";
 import { usePlaybackStore } from "../store/playbackStore";
 import { usePlaylistsStore } from "../store/playlistsStore";
 import "./views.css";
@@ -46,6 +49,10 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
   const setDescription = usePlaylistsStore((s) => s.setDescription);
   const removePlaylist = usePlaylistsStore((s) => s.remove);
   const playNow = usePlaybackStore((s) => s.playNow);
+  const favoriteIds = useFavoritesStore((s) => s.ids);
+  const toggleFavorite = useFavoritesStore((s) => s.toggle);
+  const refreshLibrary = useLibrary().refresh;
+  const confirm = useConfirmDialogStore((s) => s.confirm);
 
   const [tracks, setTracks] = useState<PlaylistTrackItem[]>([]);
   // Derived rather than a plain flag toggled inside the effect (which
@@ -60,7 +67,13 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
   const [renameValue, setRenameValue] = useState("");
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [descriptionValue, setDescriptionValue] = useState("");
-  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  function refreshTracks() {
+    playlistsApi.listTracks(playlistId).then((items) => {
+      setTracks(items);
+      setLoadedForId(playlistId);
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -149,7 +162,21 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
           >
             Edit Description
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              confirm({
+                title: "Delete Playlist",
+                description: `"${summary.name}" will be permanently deleted. This can't be undone.`,
+                confirmLabel: "Delete",
+                onConfirm: () => {
+                  void removePlaylist(playlistId);
+                  onBack();
+                },
+              })
+            }
+          >
             Delete
           </Button>
         </div>
@@ -178,19 +205,27 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
                     artworkSeed={`${item.track.artist_name ?? "Unknown Artist"} — ${item.track.album_title ?? item.track.title}`}
                     title={item.track.title}
                     subtitle={item.track.artist_name ?? "Unknown Artist"}
+                    favorite={favoriteIds.has(item.track.id)}
+                    onToggleFavorite={() => void toggleFavorite(item.track.id)}
                     onClick={() =>
                       void playNow({
                         id: item.track.id,
                         uri: pathToFileUri(item.track.path),
                       })
                     }
-                    actions={[
-                      {
-                        id: "remove",
-                        label: "Remove from Playlist",
-                        onSelect: () => handleRemoveTrack(item.id),
+                    actions={buildTrackMenuItems(item.track, {
+                      extraItems: [
+                        {
+                          id: "remove",
+                          label: "Remove from Playlist",
+                          onSelect: () => handleRemoveTrack(item.id),
+                        },
+                      ],
+                      onRemovedFromLibrary: () => {
+                        void refreshLibrary();
+                        refreshTracks();
                       },
-                    ]}
+                    })}
                   />
                 </SortableRow>
               ))}
@@ -257,18 +292,6 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
           autoFocus
         />
       </Dialog>
-
-      <ConfirmDialog
-        open={deleteOpen}
-        title="Delete Playlist"
-        description={`"${summary.name}" will be permanently deleted. This can't be undone.`}
-        confirmLabel="Delete"
-        onConfirm={() => {
-          void removePlaylist(playlistId);
-          onBack();
-        }}
-        onClose={() => setDeleteOpen(false)}
-      />
     </div>
   );
 }

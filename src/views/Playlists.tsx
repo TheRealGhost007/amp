@@ -1,12 +1,6 @@
 import { useState } from "react";
-import {
-  Button,
-  ConfirmDialog,
-  Dialog,
-  EmptyState,
-  Input,
-  MediaRow,
-} from "../components";
+import { Button, Dialog, EmptyState, Input, MediaRow } from "../components";
+import { useConfirmDialogStore } from "../store/confirmDialogStore";
 import { usePlaylistsStore } from "../store/playlistsStore";
 import { PlaylistDetail } from "./PlaylistDetail";
 import { ViewHeader } from "./ViewHeader";
@@ -18,13 +12,11 @@ export function Playlists() {
   const loading = usePlaylistsStore((s) => s.loading);
   const create = usePlaylistsStore((s) => s.create);
   const remove = usePlaylistsStore((s) => s.remove);
+  const confirm = useConfirmDialogStore((s) => s.confirm);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(
-    null,
-  );
 
   if (selectedId !== null) {
     return <PlaylistDetail playlistId={selectedId} onBack={() => setSelectedId(null)} />;
@@ -78,7 +70,12 @@ export function Playlists() {
                     label: "Delete Playlist",
                     danger: true,
                     onSelect: () =>
-                      setDeleteTarget({ id: playlist.id, name: playlist.name }),
+                      confirm({
+                        title: "Delete Playlist",
+                        description: `"${playlist.name}" will be permanently deleted. This can't be undone.`,
+                        confirmLabel: "Delete",
+                        onConfirm: () => void remove(playlist.id),
+                      }),
                   },
                 ]}
               />
@@ -112,15 +109,6 @@ export function Playlists() {
           autoFocus
         />
       </Dialog>
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        title="Delete Playlist"
-        description={`"${deleteTarget?.name}" will be permanently deleted. This can't be undone.`}
-        confirmLabel="Delete"
-        onConfirm={() => deleteTarget && void remove(deleteTarget.id)}
-        onClose={() => setDeleteTarget(null)}
-      />
     </div>
   );
 }

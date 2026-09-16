@@ -1,5 +1,15 @@
 .op-popover {
   z-index: 100;
+  /* `width: max-content` (not just `min-width`) matters for
+     `Popover.tsx`'s own size measurement: while still `position: static`
+     (its state before the positioning effect switches it to `fixed`), a
+     block element with `width: auto` stretches to fill its containing
+     block's full width — for a direct child of `<body>` via the portal,
+     that's the whole viewport — so an unmeasured, freshly-mounted
+     popover would report itself as viewport-wide instead of its real
+     content width, breaking the edge-clamping math that depends on an
+     accurate size. */
+  width: max-content;
   min-width: 180px;
   background: var(--surface);
   border: 1px solid var(--border);

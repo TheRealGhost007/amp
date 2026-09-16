@@ -23,6 +23,9 @@ vi.mock("../lib/ipc", () => ({
     isFavorite: (...args: unknown[]) => isFavoriteMock(...args),
     toggle: vi.fn(),
   },
+  history: {
+    recordPlayed: vi.fn().mockResolvedValue(undefined),
+  },
   onPlayerEvent: vi.fn().mockResolvedValue(() => {}),
   onPlayerPosition: vi.fn().mockResolvedValue(() => {}),
 }));

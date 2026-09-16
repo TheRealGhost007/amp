@@ -1,0 +1,6 @@
+.op-album-detail__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}

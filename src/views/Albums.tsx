@@ -3,6 +3,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Artwork, EmptyState } from "../components";
 import { useLibrary } from "../context/LibraryContext";
 import { useElementWidth } from "../lib/useElementWidth";
+import { useNavigationStore } from "../store/navigationStore";
+import { AlbumDetail } from "./AlbumDetail";
 import { ViewHeader } from "./ViewHeader";
 import "./views.css";
 import "./Library.css";
@@ -14,6 +16,8 @@ const TILE_HEIGHT = 168 + 52; // artwork + two lines of text
 
 export function Albums() {
   const { albums, loading } = useLibrary();
+  const albumDetailId = useNavigationStore((s) => s.albumDetailId);
+  const viewAlbum = useNavigationStore((s) => s.viewAlbum);
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerWidth = useElementWidth(scrollRef);
 
@@ -37,6 +41,10 @@ export function Albums() {
     }
     return chunks;
   }, [albums, columns]);
+
+  if (albumDetailId !== null) {
+    return <AlbumDetail albumId={albumDetailId} />;
+  }
 
   if (!loading && albums.length === 0) {
     return (
@@ -73,7 +81,12 @@ export function Albums() {
               }}
             >
               {rows[virtualRow.index]?.map((album) => (
-                <div key={album.id} className="op-album-tile">
+                <button
+                  key={album.id}
+                  type="button"
+                  className="op-album-tile"
+                  onClick={() => viewAlbum(album.id)}
+                >
                   <Artwork
                     seed={`${album.artist_name ?? "Unknown Artist"} — ${album.title}`}
                     alt=""
@@ -84,7 +97,7 @@ export function Albums() {
                     {album.artist_name ?? "Unknown Artist"}
                     {album.year ? ` · ${album.year}` : ""}
                   </p>
-                </div>
+                </button>
               ))}
             </div>
           ))}

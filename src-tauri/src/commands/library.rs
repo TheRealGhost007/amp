@@ -61,3 +61,15 @@ pub fn library_search(state: State<AppState>, query: String) -> AppResult<Vec<Tr
     let db = state.db.lock().unwrap();
     Ok(db.search_tracks_for_browse(&query, 50)?)
 }
+
+/// Permanently removes one track from the library (context menu's
+/// "Remove From Library") — distinct from a scan picking up that the
+/// file is simply gone; this also drops it from the search index so a
+/// stale entry can't outlive the row it points to.
+#[tauri::command]
+pub fn library_remove_track(state: State<AppState>, track_id: i64) -> AppResult<()> {
+    let db = state.db.lock().unwrap();
+    db.remove_track_from_search_index(track_id)?;
+    db.delete_track(track_id)?;
+    Ok(())
+}

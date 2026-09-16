@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { ToastProvider } from "./components";
 import { LibraryProvider } from "./context/LibraryContext";
 import { Shell } from "./shell/Shell";
+import { useFavoritesStore } from "./store/favoritesStore";
 import { usePlaybackStore } from "./store/playbackStore";
 import { usePlaylistsStore } from "./store/playlistsStore";
 import { useQueueStore } from "./store/queueStore";
@@ -10,12 +11,13 @@ import { useQueueStore } from "./store/queueStore";
 function App() {
   useEffect(() => {
     let cleanup: (() => void) | undefined;
-    // Queue/playlists init can run independently of the playback store's
-    // own status/event-listener setup — neither depends on the other.
-    // Playlists load app-wide (not just on the Playlists view) since the
-    // Library row menu's "Add to Playlist" flow needs the list too.
+    // Queue/playlists/favorites init can all run independently of the
+    // playback store's own status/event-listener setup. They load
+    // app-wide (not just on their own views) since track context menus
+    // everywhere need favorite status and the playlist list.
     void useQueueStore.getState().init();
     void usePlaylistsStore.getState().init();
+    void useFavoritesStore.getState().init();
     usePlaybackStore
       .getState()
       .init()
