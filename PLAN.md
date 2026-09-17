@@ -244,5 +244,22 @@ plan file's existence means work happened.
       tokens rather than new colors. Second performance pass re-ran
       Phase 13's 50k-track fixture in release mode: 5.45s, matching
       Phase 13's own number — no regression. See ARCHITECTURE.md.
-- [ ] **Phase 16 — Security Pass (§37)**.
+- [x] **Phase 16 — Security Pass (§37)**: full audit via
+      `omarchy-app-security-hardening` — static analysis + `cargo audit`
+      first, then manual file-by-file review of path-traversal defenses,
+      SQL construction, the MPRIS/D-Bus surface, the Tauri capability
+      grant, and untrusted-metadata flow from scanner to frontend. Two
+      low-severity findings fixed (both confirmed with the user first):
+      the `opener` capability was broader than needed (narrowed to
+      `allow-reveal-item-in-dir` only), and the library DB/artwork cache
+      were left world-readable by OS/crate defaults (now restricted to
+      0700/0600 via a new `restrict_to_owner_only` helper). Verified
+      rather than assumed: `metadata_editor.rs`'s path-traversal check
+      is genuinely component-aware (not the bare-string-prefix bug
+      found earlier in SQL), and the artwork cache's tag-derived file
+      extension can't carry a path-traversal payload (traced into
+      `lofty`'s actual source). One dependency advisory
+      (RUSTSEC-2024-0429, transitive via `gstreamer-rs`) isn't fixable
+      from this repo. See ARCHITECTURE.md for full findings and stated
+      coverage gaps.
 - [ ] **Phase 17 — Release Readiness**.

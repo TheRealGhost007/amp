@@ -24,14 +24,39 @@ pub struct Database {
     pub(crate) conn: Connection,
 }
 
+/// Restricts `path` to owner-only access (spec §37: the library
+/// database holds a user's full listening history and file layout —
+/// low-sensitivity compared to credentials, but still not something
+/// another local account on a shared machine should be able to read).
+/// `directories`/`fs::create_dir_all` otherwise leave the OS's default
+/// umask in effect, typically world-readable (644/755). Restricting the
+/// *directory* is what actually matters — it also covers files this
+/// function never directly touches, like SQLite's own `-wal`/`-shm`
+/// sidecars, since no other local user can traverse into a 0700
+/// directory to reach them by name in the first place; the file-level
+/// chmod alongside it is defense in depth, not the primary guarantee.
+/// Best-effort: a permission-restriction failure (e.g. an unusual
+/// filesystem that doesn't support Unix modes) must never block the app
+/// from starting.
+#[cfg(unix)]
+pub(crate) fn restrict_to_owner_only(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+}
+
+#[cfg(not(unix))]
+pub(crate) fn restrict_to_owner_only(_path: &Path, _mode: u32) {}
+
 impl Database {
     /// Opens (creating if needed) the database at `path`, applying any
     /// pending migrations.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+            restrict_to_owner_only(parent, 0o700);
         }
         let mut conn = Connection::open(path)?;
+        restrict_to_owner_only(path, 0o600);
         conn.pragma_update(None, "foreign_keys", true)?;
         // WAL + synchronous=NORMAL: SQLite's defaults (rollback-journal
         // mode, synchronous=FULL) fsync on every single auto-committed
@@ -100,5 +125,29 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         schema::migrations().to_latest(&mut conn).unwrap();
         schema::migrations().to_latest(&mut conn).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_restricts_the_data_directory_and_db_file_to_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir =
+            std::env::temp_dir().join(format!("amp-db-permissions-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db_path = dir.join("nested").join("library.sqlite3");
+
+        let _db = Database::open(&db_path).unwrap();
+
+        let dir_mode = std::fs::metadata(db_path.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let file_mode = std::fs::metadata(&db_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dir_mode, 0o700, "data directory must be owner-only");
+        assert_eq!(file_mode, 0o600, "database file must be owner-only");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

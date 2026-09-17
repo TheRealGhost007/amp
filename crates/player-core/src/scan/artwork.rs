@@ -53,6 +53,11 @@ pub fn cache_artwork(
     extension: &str,
 ) -> std::io::Result<PathBuf> {
     fs::create_dir_all(cache_dir)?;
+    // Same reasoning as the library database's own directory (spec
+    // §37) — album art reveals what's in a user's library, low
+    // sensitivity but still not something another local account on a
+    // shared machine should be able to browse.
+    crate::db::restrict_to_owner_only(cache_dir, 0o700);
     let path = cache_dir.join(format!("{key}.{extension}"));
     fs::write(&path, data)?;
     Ok(path)
@@ -160,6 +165,22 @@ mod tests {
         let cache_dir = dir.join("cache");
 
         assert!(resolve_and_cache_artwork(&cache_dir, "track-3", &audio_path, None).is_none());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_artwork_restricts_the_cache_directory_to_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp_dir("permissions");
+        let cache_dir = dir.join("cache");
+
+        cache_artwork(&cache_dir, "track-1", b"fake-jpeg-bytes", "jpg").unwrap();
+
+        let mode = fs::metadata(&cache_dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "artwork cache directory must be owner-only");
 
         fs::remove_dir_all(&dir).unwrap();
     }

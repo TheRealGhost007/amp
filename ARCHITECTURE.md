@@ -1934,6 +1934,97 @@ between Phase 13 and here beyond the bug-hunt pass's correctness fixes
 (none perf-sensitive), so this was a confirmation, not a new
 measurement under different conditions.
 
+## Phase 16: security pass (§37)
+
+Full audit via `omarchy-app-security-hardening`: static analysis
+(`npm audit`, `cargo clippy`, a heuristic secrets scan — all clean) plus
+`cargo audit` against the RustSec advisory database (installed for this
+pass, wasn't present before), then manual file-by-file review of the
+highest-risk areas rather than a surface pass.
+
+**Scope, stated honestly**: no network code exists anywhere in this app
+(confirmed via grep — it's fully offline), ruling out the whole
+remote-attacker class outright. Manually reviewed: the path-traversal
+defense, all SQL query construction, the MPRIS/D-Bus surface, the Tauri
+capability grant, and how untrusted tag/filename metadata flows through
+the scanner and into the frontend. Did not do a literal line-by-line
+pass of all ~97 frontend `.ts`/`.tsx` files beyond targeted greps — the
+realistic frontend risk (XSS from track metadata) is structurally ruled
+out by React's default auto-escaping plus a confirmed-empty grep for
+`dangerouslySetInnerHTML`/`eval`/raw HTML anywhere in the codebase,
+which is a narrower but still real form of coverage, not "reviewed
+everything."
+
+**Two low-severity findings, both fixed with explicit user confirmation
+first** (per the skill's own rule — every severity, no exceptions):
+
+1. **The Tauri capability grant was broader than the app uses.**
+   `opener:default` includes `allow-open-url` (opening arbitrary
+   `mailto:`/`tel:`/`http(s)` URLs) alongside `allow-reveal-item-in-dir`
+   — grepped confirmed the app only ever calls `revealItemInDir`, never
+   `openUrl`. Narrowed to `opener:allow-reveal-item-in-dir` only.
+2. **The library database and artwork cache were world-readable**
+   (644/755 — the OS/`directories`-crate default, not something Amp set
+   deliberately). Low real-world risk on a single-user desktop (no
+   credentials in the DB, just track metadata/paths), but another local
+   account on a shared machine could read it. Fixed with a new
+   `restrict_to_owner_only` helper in `player-core`, called right after
+   `Database::open` creates the data directory/file (0700/0600) and
+   right after `cache_artwork` creates the artwork cache directory
+   (0700) — restricting the _directory_ is what actually matters, since
+   it also covers files never directly touched (SQLite's own `-wal`/
+   `-shm` sidecars), because no other local user can traverse into a
+   0700 directory to reach them by name at all. Both new regression
+   tests confirmed to fail against a reverted version of the fix.
+
+**Verified rather than assumed, three specific concerns the task
+explicitly called out**:
+
+- `metadata_editor.rs`'s path-traversal check (`Path::starts_with` on
+  canonicalized paths) is genuinely sound against the exact class of
+  bug this project already found and fixed once elsewhere (the bug-hunt
+  pass's SQL `LIKE '<prefix>%'` sibling-directory bug) — confirmed
+  empirically that `Path::starts_with` is component-aware, not a bare
+  string prefix, so `/home/user/Music`.starts_with-style sibling
+  confusion cannot happen here the way it did in SQL.
+- The artwork cache's file extension (derived from an embedded
+  picture's tag metadata, which is attacker-influenceable — a
+  maliciously crafted audio file's tag data) cannot carry a
+  path-traversal payload into the cache path: traced into `lofty`
+  0.25.2's actual source rather than assuming, and confirmed
+  `MimeType::ext()` returns `None` (not the raw string) for its
+  `Unknown(String)` variant, so the resolved extension can only ever be
+  one of five hardcoded values or the fixed `"bin"` fallback.
+- The MPRIS D-Bus surface (reachable by _any_ local process on the
+  session bus, not just this app) is already minimal: `OpenUri`,
+  `Quit`, `Raise`, `SetFullscreen`, `SetLoopStatus`, and `SetShuffle`
+  are all inert no-ops, and `CanQuit`/`CanRaise`/`CanSetFullscreen`/
+  `HasTrackList` all report `false` — no other local process can make
+  Amp open an arbitrary file or manipulate its window via D-Bus, only
+  legitimate transport controls (play/pause/next/previous/seek/volume)
+  actually do anything.
+
+**Dependency/supply-chain, not fixable in this repo**: `cargo audit`
+found zero actual CVEs, but flagged 6 transitive crates as unmaintained
+(`paste`, `proc-macro-error`, and four `unic-*` Unicode crates — no
+known vulnerabilities in any, just no longer receiving updates) and one
+real advisory, RUSTSEC-2024-0429 (an unsoundness bug in `glib`'s
+`VariantStrIter` iterator impl, pulled in transitively via
+`gstreamer-rs`). This app never touches GLib variants directly — only
+`gstreamer-rs`'s higher-level `playbin3` API — so it's not established
+that this is reachable through anything Amp calls, but `gstreamer-rs`'s
+own internals weren't traced far enough to rule it out completely.
+Not actionable from this repo (would need `gstreamer-rs` to bump its
+own `glib` dependency); noted here to track against future
+`gstreamer-rs` releases rather than silently dropped.
+
+**Not "unbreachable," per this skill's own core principle**: this
+audit eliminated known, checkable vulnerability classes in the areas
+reviewed — it does not certify the absence of every possible flaw, and
+the frontend coverage gap above (targeted greps, not exhaustive
+line-by-line reading of every `.tsx` file) is a real, stated limit on
+what was actually checked.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and
