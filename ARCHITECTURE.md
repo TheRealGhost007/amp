@@ -1549,6 +1549,196 @@ this machine's other WebKitGTK/Tauri sibling projects. Both numbers are
 comfortably within reasonable bounds for a native-feeling desktop app;
 neither warranted further work this phase.
 
+## Full-codebase bug-hunt pass (user-requested, between Phases 13 and 14)
+
+Two real, user-reported bugs (the favorites heart icon, the collapsed
+sidebar not fitting the same way its nav icons do) triggered a
+user-requested full sweep of the whole codebase, not just the area those
+two bugs were in — "I want no bugs in this." Split across four parallel
+research agents by subsystem (`player-core`; `audio-engine`+
+`linux-integration`+`src-tauri`; frontend state/stores; frontend UI/
+components), each read-only and reporting only concrete, traced failure
+scenarios — the same discipline as the Phase 7 full-codebase pass.
+Combined, they reported 17 findings; 13 were fixed here, each with a
+regression test confirmed to fail against a reverted version of its fix
+(the two exceptions are noted below). 4 were deliberately deferred with
+reasoning, not silently dropped.
+
+**The two originally-reported bugs, found and fixed:**
+
+1. **The favorites heart icon was genuinely lopsided, not a rendering
+   glitch.** `Icon.tsx`'s `heart`/`heart-filled` SVG path data (both
+   variants shared the identical path) was not actually symmetric about
+   the viewBox's center — walking the coordinates, the left lobe reached
+   roughly twice as far from center as the right one. Every heart
+   anywhere in the app (every track row via `MediaRow`, `MiniPlayer`,
+   `FullPlayer`, the Favorites empty state) rendered the same crooked
+   shape. Replaced with a path whose control points are exact mirrors
+   (`24 - x` of each other) about `x = 12`.
+2. **The collapsed sidebar's header toggle wasn't centered the way the
+   nav icons below it are.** `.op-sidebar__item` already had a
+   `.op-sidebar--collapsed` override centering it and zeroing its
+   padding; `.op-sidebar__header` (home to the collapse-toggle button)
+   had no equivalent override, so it kept the expanded state's
+   `justify-content: space-between` and horizontal padding even with
+   the brand text gone — the toggle sat off-center relative to the nav
+   icons beneath it instead of matching their centered treatment.
+
+**Data-integrity bugs in `player-core` (the most severe findings):** 3. **Scan-root path matching used a bare string prefix, not a real path-
+component boundary.** `tracks_for_scan_diff`'s `LIKE '<prefix>%'`
+would also match a sibling path that merely starts with the same
+characters — root `/home/user/Music` incorrectly matching every
+track under an unrelated `/home/user/MusicOld/...`. This function
+backs both `scan_root`'s own diffing (a rescan of one root could
+silently delete an unrelated sibling root's tracks and cached
+artwork) and Phase 13's `remove_scan_root_and_its_tracks` (removing
+one root could delete another's tracks outright). Fixed by requiring
+the character immediately after the root to be `/` (or the path to
+equal the root exactly): `WHERE path = ?1 OR path LIKE ?2` with the
+pattern built as `<trimmed-root>/%`. 4. **`get_or_create_album` created a duplicate row every time for any
+album with no artist tag.** SQL treats `NULL` as distinct from `NULL`
+for `UNIQUE(title, artist_id)` conflict purposes, so `ON CONFLICT DO
+   NOTHING` never fired when `artist_id` was `None` — common for
+compilations/"Various Artists" folders. Every file scanned under the
+same untagged-artist album title inserted a brand-new row instead of
+reusing the first, splitting one real album across multiple entries
+in Browse. Fixed by checking for an existing row explicitly first
+(`IS`, NULL-safe unlike `=`) instead of relying on `ON CONFLICT`. 5. **Retagging or removing a track's last reference to an artist/album/
+genre left that row behind forever.** Nothing in the crate ever
+deleted an `artists`/`albums`/`genres` row once its last track moved
+away from it (`update_track`) or was deleted (`delete_track`) — they
+accumulated as permanent zero-track "ghost" entries, visible forever
+in Browse's `LEFT JOIN`-based listings. Fixed with a new
+`gc_orphaned_taxonomy` helper, called from both `update_track` (using
+the row's pre-update values) and `delete_track` (using its values
+before the delete), that removes each of the three only if no track
+references it anymore — safe to call unconditionally, since a
+still-current id is still referenced by the row that was just
+written.
+
+**Frontend state races — the same "unguarded IPC reorder" shape already
+fixed once in `playbackStore` (Phase 7), found unfixed in every other
+store that does `await someIpcCall(); set(...)`:** Tauri dispatches
+non-async commands across a thread pool, so two overlapping calls to the
+same store method are not guaranteed to resolve in call order; a
+slower, now-superseded reply landing after a faster, newer one can
+silently overwrite correct state with stale state. 6. `favoritesStore.toggle` — double-clicking a heart fast enough could
+leave the displayed favorite state opposite to the real backend
+state. Fixed with a per-track sequence guard (not one global counter,
+since toggling track A must never invalidate a concurrent, unrelated
+toggle of track B). 7. `queueStore.addToQueue`/`playNext`/`init` — two queue actions in
+quick succession (or one racing a `remove`/`clear`/`consumeHead`)
+could resurrect an item the user just removed, or silently drop one
+just added. Fixed with a single shared sequence counter bumped by
+every mutating method; the methods that re-fetch via `list()` only
+apply that fetch if no newer mutation started while it was in flight. 8. `playlistsStore.refresh` (and therefore `create`/`rename`/
+`setDescription`, which all call it) — renaming one playlist while
+deleting another could resurrect the deleted one. Same fix shape. 9. `LibraryContext`'s `refresh`/mount-time fetch — clicking "Remove" on
+two scan-root folders in quick succession (nothing disables the
+buttons) could leave the Library view showing tracks from a folder
+just removed. Fixed with a `useRef`-held sequence shared between the
+mount effect and `refresh`, since the hazard exists between them too
+(an early `addFolder` racing the still-in-flight initial load).
+
+**Other real bugs, frontend:** 10. **Two dialogs open at once both reacted to one Escape press.** Every
+open `Dialog` registered its own independent `document`-level
+keydown listener with no awareness of any other one.
+`MetadataEditDialog` and `ConfirmDialog` can both be open
+simultaneously (clicking "Save" opens a confirmation on top of the
+still-open editor); pressing Escape to dismiss just the confirmation
+also closed the editor underneath, discarding unsaved edits. Fixed
+with a module-level stack of open dialog ids — each instance only
+acts on Escape/Tab-trapping when it's the topmost one. 11. **The playback-progress slider divided by zero before any track had
+ever loaded a duration.** `Slider`'s fill-percent calculation is
+`(value - min) / (max - min)`; both `MiniPlayer`/`FullPlayer` pass
+`max={durationMs ?? 0}` with `min=0`, so before anything has ever
+played this is `0/0 = NaN` — an invalid CSS `<percentage>` that
+silently broke the `var()` substitution in the track's fill
+gradient. Fixed by special-casing a zero range to 0%. 12. **Toasts rendered on top of the persistent mini-player's controls.**
+`.op-toast-viewport`'s `bottom: var(--space-lg)` (24px) sat well
+inside the mini-player's 72px band, so every toast (a frequently-
+triggered, real action confirmation) covered its favorite-heart/
+volume-slider corner for the few seconds it was visible. Fixed by
+offsetting from a new shared `--mini-player-height` token instead of
+a bare spacing value, so the two can't drift apart again. 13. **`MediaRow` was a `<button>` containing two more independently-
+focusable `role="button"` elements of its own** (the favorite
+toggle, the "..." menu trigger) — interactive content nested inside
+a native `<button>` is invalid HTML, and WebKitGTK (this app's
+actual runtime) commonly exposes a `<button>` to the accessibility
+tree as a leaf node, risking the inner controls not being reachable
+or announced correctly by assistive technology despite having their
+own `aria-label`s. This is the single shared row primitive used by
+every list in the app. Fixed by changing the root to a `role=
+    "button"` div with Enter/Space activation wired up manually to
+replace what a real button gave for free — verified equivalent
+keyboard behavior with new tests, though the actual HTML-validity
+defect isn't something jsdom enforces, so those tests confirm the
+fix's behavior rather than failing against the pre-fix version. 14. **The Queue view's "Now playing" row was a dead control.** Rendered
+via `MediaRow` (a real, focusable, hover-highlighted button) with no
+`onClick` — reachable by keyboard/screen-reader users who'd
+naturally expect it to do something, and did nothing. Fixed by
+wiring it up like every other row in the app: favorite toggle,
+duration, a context menu, and a click that expands to the full
+player (the same action `MiniPlayer`'s identity area already
+performs for the identical "this is what's playing" row). 15. **A stale ESLint ignore pattern** (unrelated to the sweep's brief,
+noticed in passing): not a functional bug, see Phase 13's own
+section — already fixed there.
+
+**Backend correctness bugs, `audio-engine`/`src-tauri`:** 16. **A fatal pipeline error on the active slot left the player
+permanently reporting "still playing."** `BackendEvent::Error`
+(decode failure, the output device disappearing mid-playback) was
+forwarded as a `PlayerEvent::Error` and nothing else — contrast with
+`Eos`, which fully updates `current`/`is_playing` and emits
+`StateChanged`/`PlaybackFinished`. `current_track`/`is_playing`
+stayed exactly as they were forever after a real hardware error,
+with MPRIS and the frontend both stuck showing "Playing" with no
+Rust-side recovery. Fixed to match the "no next queued" EOS branch:
+report the error, then report playback as genuinely stopped. 17. **Desktop track-change notifications were entirely gated on MPRIS
+having registered successfully**, even though
+`org.freedesktop.Notifications` is a fully independent D-Bus
+service. If MPRIS failed to register at startup (no session bus,
+name already taken — real, possible causes already documented in
+`state.rs`), a user with "notify on track change" enabled got zero
+notifications for the rest of the session, with nothing logged
+anywhere to explain why. Fixed by decoupling track-change detection
+(`NowPlayingTracker::refresh_if_changed`) and the notify decision
+from `state.mpris.is_some()` — only the MPRIS snapshot itself stays
+conditional on MPRIS actually being available.
+
+**Deliberately deferred, not silently dropped:**
+
+- **Playback speed silently resets to 1.0x on every track transition**
+  (`GstreamerBackend::set_playback_speed` no-ops below `Paused` state,
+  but `apply_slot_settings` always calls it immediately after `load()`,
+  pipeline still `Null`). Real, but `player.setPlaybackSpeed` is not
+  currently called from any frontend UI — Phase 4 built the backend
+  capability but no Settings control was ever wired to it, so this bug
+  is unreachable by any actual user action today. Worth fixing whenever
+  a playback-speed control is added, not before.
+- **Two audio output devices sharing the same display name resolve to
+  the same device id** (`list_output_devices` uses `display_name()` as
+  both id and name), so selecting the second one always routes to
+  whichever the enumeration returns first. A real gap, but this
+  development machine (and most single-output setups) can't exercise
+  it, and a synthetic reproduction wouldn't verify anything the fix
+  itself doesn't already make obvious; deferred until it can be
+  verified against real duplicate-named hardware.
+- **A structural race between GStreamer's `about-to-finish` signal
+  (fired from its own streaming thread) and a `player_set_next` call
+  arriving at the moment gapless-next has already been committed.**
+  Moderate confidence, not empirically reproduced under real GStreamer
+  timing — the reporting agent flagged this as requiring real pipeline
+  timing to confirm, not something a `SimulatedBackend` test can
+  establish either way. Deferred rather than shipping a speculative fix
+  for a race that hasn't been demonstrated to actually occur.
+- **An accidental scan of the developer's own real `~/Music` folder**,
+  added by automated on-device keyboard testing during this same
+  session (a focus-stealing interaction from an unrelated desktop
+  notification caused a blind keypress sequence to land on "Add
+  Folder"). Not a code bug — flagged to the user to remove via Settings
+  > Library at their convenience (or on request), rather than an
+  > automated destructive DB write during this pass.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

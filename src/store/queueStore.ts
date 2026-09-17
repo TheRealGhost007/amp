@@ -47,32 +47,53 @@ async function syncNextWithBackend(items: QueueTrackItem[]) {
   }
 }
 
+/** Tauri dispatches non-async commands across a thread pool, so two
+ * overlapping queue mutations (e.g. "Add to Queue" on two different
+ * tracks in quick succession) are not guaranteed to resolve in call
+ * order — same shape of race already fixed once in playbackStore. Every
+ * mutating method bumps this before doing anything else; the methods
+ * that re-fetch the list from the backend (`init`/`addToQueue`/
+ * `playNext`) only apply that fetch's result if no newer mutation
+ * started while it was in flight, so a slower, now-superseded `list()`
+ * reply can never overwrite state a newer action already produced —
+ * including a local (non-refetching) update like `remove`/`clear`/
+ * `consumeHead`, which is exactly what a stale reply could otherwise
+ * silently resurrect. */
+let queueSeq = 0;
+
 export const useQueueStore = create<QueueStore>((set, get) => ({
   items: [],
   loading: true,
 
   init: async () => {
+    const seq = ++queueSeq;
     set({ loading: true });
     const items = await queue.list();
+    if (seq !== queueSeq) return;
     set({ items, loading: false });
     await syncNextWithBackend(items);
   },
 
   addToQueue: async (trackId) => {
+    const seq = ++queueSeq;
     await queue.add(trackId);
     const items = await queue.list();
+    if (seq !== queueSeq) return;
     set({ items });
     await syncNextWithBackend(items);
   },
 
   playNext: async (trackId) => {
+    const seq = ++queueSeq;
     await queue.playNext(trackId);
     const items = await queue.list();
+    if (seq !== queueSeq) return;
     set({ items });
     await syncNextWithBackend(items);
   },
 
   remove: async (queueItemId) => {
+    queueSeq++;
     await queue.remove(queueItemId);
     const items = get().items.filter((item) => item.id !== queueItemId);
     set({ items });
@@ -80,6 +101,7 @@ export const useQueueStore = create<QueueStore>((set, get) => ({
   },
 
   reorder: async (queueItemIds) => {
+    queueSeq++;
     const byId = new Map(get().items.map((item) => [item.id, item]));
     const items = queueItemIds
       .map((id) => byId.get(id))
@@ -92,12 +114,14 @@ export const useQueueStore = create<QueueStore>((set, get) => ({
   },
 
   clear: async () => {
+    queueSeq++;
     await queue.clear();
     set({ items: [] });
     await syncNextWithBackend([]);
   },
 
   consumeHead: async () => {
+    queueSeq++;
     const [head, ...rest] = get().items;
     if (!head) return;
     set({ items: rest });

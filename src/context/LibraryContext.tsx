@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -49,30 +50,42 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   // set-state-in-effect rule flags that) — it only needs to clear the
   // flag once loading actually finishes.
   const [loading, setLoading] = useState(true);
+  // Tauri dispatches non-async commands across a thread pool, so two
+  // overlapping fetches (the initial mount load racing an early
+  // `addFolder`/`removeScanRoot`-triggered `refresh`, or two quick
+  // `refresh` calls) are not guaranteed to resolve in call order — same
+  // shape of race already fixed once in playbackStore. Shared between
+  // the mount effect and `refresh` so either one can tell a slower,
+  // now-superseded fetch to discard its result instead of overwriting
+  // newer state.
+  const seqRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const seq = ++seqRef.current;
     setLoading(true);
     try {
       const snapshot = await fetchLibrarySnapshot();
+      if (seq !== seqRef.current) return;
       setTracks(snapshot.tracks);
       setAlbums(snapshot.albums);
       setArtists(snapshot.artists);
     } finally {
-      setLoading(false);
+      if (seq === seqRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    const seq = ++seqRef.current;
     let cancelled = false;
     fetchLibrarySnapshot()
       .then((snapshot) => {
-        if (cancelled) return;
+        if (cancelled || seq !== seqRef.current) return;
         setTracks(snapshot.tracks);
         setAlbums(snapshot.albums);
         setArtists(snapshot.artists);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && seq === seqRef.current) setLoading(false);
       });
     return () => {
       cancelled = true;

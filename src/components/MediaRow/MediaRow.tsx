@@ -1,10 +1,10 @@
-import { ButtonHTMLAttributes, ReactNode, useRef, useState } from "react";
+import { HTMLAttributes, KeyboardEvent, ReactNode, useRef, useState } from "react";
 import { Artwork } from "../Artwork/Artwork";
 import { Icon } from "../Icon/Icon";
 import { Menu, type MenuItemSpec } from "../Menu/Menu";
 import "./MediaRow.css";
 
-interface MediaRowProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface MediaRowProps extends HTMLAttributes<HTMLDivElement> {
   artworkSrc?: string | null;
   artworkSeed: string;
   title: string;
@@ -20,7 +20,17 @@ interface MediaRowProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 /** The one shared row component for songs/albums/artists/playlists in
  * lists — spec §31 asks for a single reusable primitive here rather than
- * per-view bespoke rows. */
+ * per-view bespoke rows.
+ *
+ * A `role="button"` div, not a real `<button>`: the row also contains
+ * two independently-focusable controls of its own (the favorite toggle,
+ * the "..." menu trigger), and interactive content nested inside a real
+ * `<button>` is invalid HTML — WebKitGTK (this app's actual runtime)
+ * commonly exposes a `<button>` to the accessibility tree as a leaf
+ * node, which risked those inner controls not being reachable or
+ * announced correctly by assistive technology despite having their own
+ * `aria-label`s. Enter/Space activation is wired up manually below to
+ * replace what a real button would otherwise give for free. */
 export function MediaRow({
   artworkSrc,
   artworkSeed,
@@ -32,16 +42,31 @@ export function MediaRow({
   onToggleFavorite,
   actions,
   className,
+  onClick,
+  onKeyDown,
   ...rest
 }: MediaRowProps) {
   const menuAnchorRef = useRef<HTMLSpanElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    onKeyDown?.(e);
+    if (e.defaultPrevented) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick?.(e as unknown as React.MouseEvent<HTMLDivElement>);
+    }
+  }
+
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       className={["op-media-row", active && "op-media-row--active", className]
         .filter(Boolean)
         .join(" ")}
+      onClick={onClick}
+      onKeyDown={handleKeyDown}
       {...rest}
     >
       <Artwork src={artworkSrc} seed={artworkSeed} alt="" size={40} />
@@ -103,6 +128,6 @@ export function MediaRow({
           />
         </>
       )}
-    </button>
+    </div>
   );
 }

@@ -1,7 +1,11 @@
 .op-toast-viewport {
   position: fixed;
   right: var(--space-lg);
-  bottom: var(--space-lg);
+  /* Clears the persistent mini-player docked at the bottom of the shell
+   * — a plain `--space-lg` offset from the viewport bottom sat well
+   * inside the mini-player's band, so every toast rendered on top of
+   * its favorite/volume controls for the few seconds it was visible. */
+  bottom: calc(var(--mini-player-height) + var(--space-lg));
   z-index: 300;
   display: flex;
   flex-direction: column;

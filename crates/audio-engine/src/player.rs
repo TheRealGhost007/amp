@@ -280,7 +280,23 @@ impl<B: Backend> Player<B> {
                         out.push(PlayerEvent::PlaybackFinished);
                     }
                 }
-                BackendEvent::Error(message) => out.push(PlayerEvent::Error(message)),
+                BackendEvent::Error(message) => {
+                    // A fatal pipeline error on the active slot (decode
+                    // failure, the output device disappearing mid-
+                    // playback, ...) previously left `current`/
+                    // `is_playing` completely untouched — the app (and
+                    // MPRIS) kept reporting "still playing" that track
+                    // forever, with no way to recover short of a brand
+                    // new `play_now`. Matches the "no next queued" EOS
+                    // branch above: report the error, then report
+                    // playback as genuinely stopped, same as any other
+                    // path that ends up with nothing left to play.
+                    out.push(PlayerEvent::Error(message));
+                    self.current = None;
+                    self.is_playing = false;
+                    out.push(PlayerEvent::StateChanged(PlaybackState::Stopped));
+                    out.push(PlayerEvent::PlaybackFinished);
+                }
             }
         }
 
@@ -641,6 +657,37 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, PlayerEvent::Error(msg) if msg == "decode error")));
+    }
+
+    #[test]
+    fn a_fatal_error_on_the_active_slot_stops_playback_instead_of_freezing_state() {
+        // Regression test: a fatal pipeline error on the active slot
+        // (decode failure, output device disappearing mid-playback, ...)
+        // used to be reported via `PlayerEvent::Error` alone, with
+        // `current`/`is_playing` left completely untouched — the player
+        // (and anything reading it, like MPRIS) kept reporting "still
+        // playing" that track forever, with no way to recover short of
+        // starting an entirely new `play_now`.
+        let mut player = Player::new(SimulatedBackend::new());
+        player.play_now(track(1, "a")).unwrap();
+        assert!(player.is_playing());
+
+        player
+            .backend
+            .push_error_for_test(Slot::A, "device disconnected");
+        let events = player.tick(100).unwrap();
+
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, PlayerEvent::Error(msg) if msg == "device disconnected")));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, PlayerEvent::StateChanged(PlaybackState::Stopped))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, PlayerEvent::PlaybackFinished)));
+        assert_eq!(player.current_track(), None);
+        assert!(!player.is_playing());
     }
 
     #[test]

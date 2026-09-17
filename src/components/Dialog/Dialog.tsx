@@ -15,18 +15,34 @@ interface DialogProps {
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/** Every open `Dialog` used to register its own independent `document`
+ * keydown listener with no awareness of any other one — two dialogs
+ * open at once (e.g. `MetadataEditDialog` with its own "Save" opening a
+ * `ConfirmDialog` on top) both reacted to the same Escape press, so
+ * dismissing just the confirmation also silently closed the editor
+ * underneath and discarded unsaved edits. This module-level stack lets
+ * each instance ask "am I the topmost open dialog?" before acting, so
+ * Escape/Tab-trapping only ever affects the one actually on top. */
+let dialogStack: symbol[] = [];
+
 export function Dialog({ open, onClose, title, children, footer }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  const dialogId = useRef(Symbol("dialog"));
 
   useEffect(() => {
     if (!open) return;
+    const id = dialogId.current;
+    dialogStack.push(id);
+    const isTopmost = () => dialogStack[dialogStack.length - 1] === id;
+
     previouslyFocused.current = document.activeElement as HTMLElement;
     const panel = panelRef.current;
     const focusable = panel?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
     focusable?.[0]?.focus();
 
     function handleKeyDown(e: KeyboardEvent) {
+      if (!isTopmost()) return;
       if (e.key === "Escape") {
         onClose();
         return;
@@ -46,6 +62,7 @@ export function Dialog({ open, onClose, title, children, footer }: DialogProps) 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      dialogStack = dialogStack.filter((entry) => entry !== id);
       previouslyFocused.current?.focus();
     };
   }, [open, onClose]);

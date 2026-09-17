@@ -15,9 +15,11 @@ import {
 } from "@dnd-kit/sortable";
 import { Button, Card, EmptyState, MediaRow, SortableRow } from "../components";
 import { useLibrary } from "../context/LibraryContext";
+import { formatDuration } from "../lib/format";
 import { pathToFileUri } from "../lib/ipc";
 import { buildTrackMenuItems } from "../lib/trackMenu";
 import { useNowPlaying } from "../player/useNowPlaying";
+import { usePlayerViewStore } from "../store/playerViewStore";
 import { useFavoritesStore } from "../store/favoritesStore";
 import { usePlaybackStore } from "../store/playbackStore";
 import { useQueueStore } from "../store/queueStore";
@@ -35,6 +37,7 @@ export function Queue() {
   const clearQueue = useQueueStore((s) => s.clear);
   const favoriteIds = useFavoritesStore((s) => s.ids);
   const toggleFavorite = useFavoritesStore((s) => s.toggle);
+  const expandPlayer = usePlayerViewStore((s) => s.expand);
   const refreshLibrary = useLibrary().refresh;
 
   const sensors = useSensors(
@@ -73,7 +76,21 @@ export function Queue() {
             artworkSeed={`${track.artist_name ?? "Unknown Artist"} — ${track.album_title ?? track.title}`}
             title={track.title}
             subtitle={track.artist_name ?? (isPlaying ? "Playing" : "Paused")}
+            trailing={formatDuration(track.duration_ms)}
+            favorite={favoriteIds.has(track.id)}
+            onToggleFavorite={() => void toggleFavorite(track.id)}
             active
+            // Every other row in the app is a real, clickable control —
+            // this one rendered as a focusable, hoverable button that
+            // silently did nothing on click or Enter/Space, a dead
+            // control in the tab order. Expanding to the full player is
+            // the same action MiniPlayer's own artwork/title already
+            // performs for the identical "this is what's playing" row.
+            onClick={expandPlayer}
+            actions={buildTrackMenuItems(track, {
+              onRemovedFromLibrary: () => void refreshLibrary(),
+              onMetadataUpdated: () => void refreshLibrary(),
+            })}
           />
         </Card>
       )}

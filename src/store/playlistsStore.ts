@@ -13,6 +13,15 @@ interface PlaylistsStore {
   remove: (id: number) => Promise<void>;
 }
 
+/** Tauri dispatches non-async commands across a thread pool, so two
+ * overlapping mutations (e.g. renaming one playlist while deleting
+ * another) are not guaranteed to resolve in call order — same shape of
+ * race already fixed once in playbackStore. `refresh`'s `list()`
+ * round-trip only applies if no newer mutation started while it was in
+ * flight, so a slower, now-superseded reply can't resurrect a playlist
+ * `remove` already dropped locally. */
+let playlistsSeq = 0;
+
 /** Playlist summaries (name/description/track count) for the Playlists
  * list view — a playlist's own tracks are fetched separately, view-local
  * to whichever detail screen is open, since only one is ever shown at a
@@ -22,13 +31,18 @@ export const usePlaylistsStore = create<PlaylistsStore>((set, get) => ({
   loading: true,
 
   init: async () => {
+    const seq = ++playlistsSeq;
     set({ loading: true });
     const items = await playlists.list();
+    if (seq !== playlistsSeq) return;
     set({ items, loading: false });
   },
 
   refresh: async () => {
-    set({ items: await playlists.list() });
+    const seq = ++playlistsSeq;
+    const items = await playlists.list();
+    if (seq !== playlistsSeq) return;
+    set({ items });
   },
 
   create: async (name) => {
@@ -48,6 +62,7 @@ export const usePlaylistsStore = create<PlaylistsStore>((set, get) => ({
   },
 
   remove: async (id) => {
+    playlistsSeq++;
     await playlists.delete(id);
     set({ items: get().items.filter((p) => p.id !== id) });
   },

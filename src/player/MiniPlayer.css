@@ -3,7 +3,7 @@
   grid-template-columns: minmax(180px, 260px) 1fr minmax(160px, 220px);
   align-items: center;
   gap: var(--space-lg);
-  height: 72px;
+  height: var(--mini-player-height);
   padding: 0 var(--space-md);
   background: var(--bg-dim);
   border-top: 1px solid var(--border);

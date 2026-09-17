@@ -9,6 +9,16 @@ interface FavoritesStore {
   toggle: (trackId: number) => Promise<void>;
 }
 
+/** Tauri dispatches non-async commands across a thread pool, so two
+ * concurrent `toggle` calls (e.g. double-clicking a heart icon fast) are
+ * not guaranteed to resolve in call order — same shape of race already
+ * fixed once in playbackStore (trackMutationSeq/favoriteSeq). Guarding
+ * per-track rather than with one global counter, since toggling track A
+ * must never be able to invalidate a concurrent, unrelated toggle of
+ * track B. */
+let toggleSeq = 0;
+const toggleSeqByTrack = new Map<number, number>();
+
 /** A shared, general-purpose "is track X favorited" lookup for row
  * rendering (Library/Queue/Playlist/Favorites/Recently Played rows all
  * need this), backed by one batch fetch rather than a per-row IPC call.
@@ -26,7 +36,10 @@ export const useFavoritesStore = create<FavoritesStore>((set, get) => ({
   },
 
   toggle: async (trackId) => {
+    const seq = ++toggleSeq;
+    toggleSeqByTrack.set(trackId, seq);
     const isFavorite = await favorites.toggle(trackId);
+    if (toggleSeqByTrack.get(trackId) !== seq) return;
     const ids = new Set(get().ids);
     if (isFavorite) ids.add(trackId);
     else ids.delete(trackId);

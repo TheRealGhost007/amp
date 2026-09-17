@@ -86,22 +86,28 @@ fn spawn_player_tick_loop(app_handle: tauri::AppHandle) {
                     })
                 });
 
+                // Track-change detection and desktop notifications are
+                // independent of MPRIS (`org.freedesktop.Notifications`
+                // is its own D-Bus service, not part of MPRIS at all) —
+                // gating this whole block on `state.mpris.is_some()`
+                // meant that if MPRIS ever failed to register at startup
+                // (no session bus, name already taken — real, possible
+                // causes), a user with "notify on track change" enabled
+                // silently got zero notifications for the rest of the
+                // session, with nothing logged anywhere to explain why.
                 let track_id = player.current_track().map(|t| t.id);
-                let (snapshot, notify) = if state.mpris.is_some() {
-                    let db = state.db.lock().unwrap();
-                    let is_new_track = now_playing.refresh_if_changed(&db, &cache_dir, track_id);
+                let db = state.db.lock().unwrap();
+                let is_new_track = now_playing.refresh_if_changed(&db, &cache_dir, track_id);
+                let notify = is_new_track && notifications_enabled(&db);
+                let snapshot = state.mpris.is_some().then(|| {
                     let playback_state = playback_state_for(is_playing, track_id.is_some());
-                    let snapshot = now_playing.snapshot(
+                    now_playing.snapshot(
                         position_ms.unwrap_or(0),
                         duration_ms,
                         playback_state,
                         player.volume(),
-                    );
-                    let notify = is_new_track && notifications_enabled(&db);
-                    (Some(snapshot), notify)
-                } else {
-                    (None, false)
-                };
+                    )
+                });
 
                 (events, position, snapshot, notify)
             };

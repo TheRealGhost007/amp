@@ -33,6 +33,16 @@
   flex-shrink: 0;
 }
 
+/* Collapsed: the brand text is gone, so `space-between` + the expanded
+ * state's horizontal padding would leave the toggle sitting off-center
+ * against the collapsed column's true width, misaligned with the nav
+ * icons below (which do get a matching centered treatment). Matches
+ * `.op-sidebar--collapsed .op-sidebar__item`'s own override below. */
+.op-sidebar--collapsed .op-sidebar__header {
+  justify-content: center;
+  padding: 0;
+}
+
 .op-sidebar__brand {
   font-size: var(--text-title);
   font-weight: var(--font-weight-semibold);

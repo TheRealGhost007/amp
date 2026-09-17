@@ -51,6 +51,13 @@
   --radius-control: 6px; /* buttons, inputs, chips, menu items */
   --radius-container: 14px; /* cards, dialogs, panels, artwork frames */
 
+  /* ---- Layout ---- */
+  /* The persistent mini-player docked at the bottom of the shell — a
+   * shared token so anything else positioned relative to the viewport
+   * bottom (the toast viewport) can stay clear of it without the two
+   * values drifting apart. */
+  --mini-player-height: 72px;
+
   /* ---- Motion ---- */
   /* Respect prefers-reduced-motion by zeroing these (see global.css). */
   --motion-fast: 120ms;

@@ -114,6 +114,54 @@ describe("queueStore", () => {
     expect(useQueueStore.getState().items).toEqual([item(10, 1, "/a.flac")]);
   });
 
+  it("a slower, superseded addToQueue reply does not overwrite a newer action's result", async () => {
+    // Regression test: Tauri dispatches non-async commands across a
+    // thread pool, so two overlapping mutations are not guaranteed to
+    // resolve in call order. Without a sequence guard, this stale
+    // addToQueue reply arriving after playNext's already-applied result
+    // would silently resurrect a stale snapshot, dropping whatever
+    // playNext actually did.
+    let resolveFirstList!: (items: QueueTrackItem[]) => void;
+    listMock.mockImplementationOnce(
+      () => new Promise<QueueTrackItem[]>((resolve) => (resolveFirstList = resolve)),
+    );
+    addMock.mockResolvedValue(undefined);
+    playNextMock.mockResolvedValue(undefined);
+
+    const firstCall = useQueueStore.getState().addToQueue(1);
+    listMock.mockResolvedValueOnce([item(20, 2, "/b.flac")]);
+    await useQueueStore.getState().playNext(2);
+    expect(useQueueStore.getState().items).toEqual([item(20, 2, "/b.flac")]);
+
+    // The slower call's reply finally arrives — must be discarded, not
+    // applied over the newer, correct state.
+    resolveFirstList([item(10, 1, "/a.flac")]);
+    await firstCall;
+
+    expect(useQueueStore.getState().items).toEqual([item(20, 2, "/b.flac")]);
+  });
+
+  it("a slower, superseded addToQueue reply cannot resurrect an item a newer remove() already dropped", async () => {
+    useQueueStore.setState({ items: [item(10, 1, "/a.flac"), item(11, 2, "/b.flac")] });
+    let resolveList!: (items: QueueTrackItem[]) => void;
+    listMock.mockImplementationOnce(
+      () => new Promise<QueueTrackItem[]>((resolve) => (resolveList = resolve)),
+    );
+    addMock.mockResolvedValue(undefined);
+    removeMock.mockResolvedValue(undefined);
+
+    const addCall = useQueueStore.getState().addToQueue(3);
+    await useQueueStore.getState().remove(11);
+    expect(useQueueStore.getState().items).toEqual([item(10, 1, "/a.flac")]);
+
+    // addToQueue's stale list() reply (fetched before the remove landed
+    // server-side) still includes the removed item — must not resurrect it.
+    resolveList([item(10, 1, "/a.flac"), item(11, 2, "/b.flac"), item(12, 3, "/c.flac")]);
+    await addCall;
+
+    expect(useQueueStore.getState().items).toEqual([item(10, 1, "/a.flac")]);
+  });
+
   it("does not throw when the backend's next slot can't be armed (e.g. audio unavailable)", async () => {
     // Regression test: every mutation calls syncNextWithBackend, which
     // previously let player.setNext's rejection propagate unguarded —

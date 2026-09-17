@@ -10,7 +10,12 @@ interface SliderProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"
  * playback progress and volume. */
 export const Slider = forwardRef<HTMLInputElement, SliderProps>(
   ({ label, className, min = 0, max = 100, value, ...rest }, ref) => {
-    const percent = ((Number(value) - Number(min)) / (Number(max) - Number(min))) * 100;
+    // `max === min` (e.g. the playback progress slider before any track
+    // has ever loaded a duration, both 0) would divide by zero — `NaN%`
+    // is not a valid CSS <percentage>, silently breaking the whole
+    // `var()` substitution in the track's fill gradient.
+    const range = Number(max) - Number(min);
+    const percent = range === 0 ? 0 : ((Number(value) - Number(min)) / range) * 100;
 
     return (
       <input

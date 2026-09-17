@@ -50,16 +50,37 @@ impl Database {
         artist_id: Option<i64>,
         year: Option<i64>,
     ) -> Result<Album> {
-        self.conn.execute(
-            "INSERT INTO albums (title, artist_id, year) VALUES (?1, ?2, ?3)
-             ON CONFLICT(title, artist_id) DO NOTHING",
-            params![title, artist_id, year],
-        )?;
-        self.conn
+        // `UNIQUE(title, artist_id)` gives `ON CONFLICT` nothing to
+        // conflict against when `artist_id` is NULL — SQL treats NULL as
+        // distinct from NULL for uniqueness purposes, so every
+        // untagged-artist album (common for compilations/"Various
+        // Artists" folders) would insert a brand-new duplicate row on
+        // every call instead of reusing the first one, splitting one
+        // real album across multiple rows in Browse. Checking for an
+        // existing row explicitly first (`IS`, NULL-safe unlike `=`)
+        // works correctly for both the NULL and non-NULL cases, and is
+        // race-free in practice since every caller in this app
+        // serializes access to one `Database` behind a single mutex.
+        if let Some(existing) = self
+            .conn
             .query_row(
                 "SELECT id, title, artist_id, year FROM albums
                  WHERE title = ?1 AND artist_id IS ?2",
                 params![title, artist_id],
+                Self::row_to_album,
+            )
+            .optional()?
+        {
+            return Ok(existing);
+        }
+        self.conn.execute(
+            "INSERT INTO albums (title, artist_id, year) VALUES (?1, ?2, ?3)",
+            params![title, artist_id, year],
+        )?;
+        self.conn
+            .query_row(
+                "SELECT id, title, artist_id, year FROM albums WHERE id = ?1",
+                params![self.conn.last_insert_rowid()],
                 Self::row_to_album,
             )
             .map_err(Into::into)
@@ -98,6 +119,10 @@ impl Database {
     /// finds an on-disk file whose mtime changed. Path and id are
     /// untouched — see `rename_track_path` for path changes.
     pub fn update_track(&self, id: i64, track: &NewTrack) -> Result<()> {
+        // Captured before the write so a retag that moves this track off
+        // an artist/album/genre can tell whether that old one is now
+        // orphaned — see `gc_orphaned_taxonomy`.
+        let previous = self.get_track(id)?;
         self.conn.execute(
             "UPDATE tracks SET
                 title = ?1, artist_id = ?2, album_id = ?3, album_artist = ?4,
@@ -121,6 +146,48 @@ impl Database {
                 id,
             ],
         )?;
+        if let Some(previous) = previous {
+            self.gc_orphaned_taxonomy(previous.artist_id, previous.album_id, previous.genre_id)?;
+        }
+        Ok(())
+    }
+
+    /// Removes an artist/album/genre row if nothing references it
+    /// anymore — called after anything that could leave one newly
+    /// orphaned (`update_track` retagging a track away from it, or
+    /// `delete_track` removing its last track). Without this, artists/
+    /// albums/genres accumulated permanently as zero-track "ghost"
+    /// entries in Browse every time a track was retagged or removed;
+    /// safe to call even when nothing actually changed (a still-current
+    /// id is still referenced by the row that was just written, so the
+    /// `NOT EXISTS` check simply finds nothing to remove).
+    fn gc_orphaned_taxonomy(
+        &self,
+        artist_id: Option<i64>,
+        album_id: Option<i64>,
+        genre_id: Option<i64>,
+    ) -> Result<()> {
+        if let Some(id) = artist_id {
+            self.conn.execute(
+                "DELETE FROM artists WHERE id = ?1
+                 AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = ?1)",
+                params![id],
+            )?;
+        }
+        if let Some(id) = album_id {
+            self.conn.execute(
+                "DELETE FROM albums WHERE id = ?1
+                 AND NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = ?1)",
+                params![id],
+            )?;
+        }
+        if let Some(id) = genre_id {
+            self.conn.execute(
+                "DELETE FROM genres WHERE id = ?1
+                 AND NOT EXISTS (SELECT 1 FROM tracks WHERE genre_id = ?1)",
+                params![id],
+            )?;
+        }
         Ok(())
     }
 
@@ -139,12 +206,24 @@ impl Database {
     /// Minimal projection of every track whose path starts with
     /// `path_prefix`, for the scanner to diff against the filesystem.
     pub fn tracks_for_scan_diff(&self, path_prefix: &str) -> Result<Vec<ScanDiffRow>> {
-        let like_pattern = format!("{}%", path_prefix.replace('%', "\\%").replace('_', "\\_"));
+        // A bare string prefix (`LIKE '<prefix>%'`) also matches any
+        // sibling path that merely starts with the same characters —
+        // root "/home/user/Music" would incorrectly match every track
+        // under an unrelated "/home/user/MusicOld/...". Requiring the
+        // character right after the root to be a path separator (or the
+        // path to equal the root exactly) makes this a real
+        // path-component boundary match, not a plain string prefix, so
+        // a rescan (or `remove_scan_root_and_its_tracks`) of one root
+        // can never see — or delete — an unrelated root's tracks just
+        // because their paths happen to share a prefix.
+        let trimmed = path_prefix.trim_end_matches('/');
+        let escaped = trimmed.replace('%', "\\%").replace('_', "\\_");
+        let like_pattern = format!("{escaped}/%");
         let mut stmt = self.conn.prepare(
             "SELECT id, path, mtime, content_hash FROM tracks
-             WHERE path LIKE ?1 ESCAPE '\\'",
+             WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\'",
         )?;
-        let rows = stmt.query_map(params![like_pattern], |row| {
+        let rows = stmt.query_map(params![trimmed, like_pattern], |row| {
             Ok(ScanDiffRow {
                 id: row.get(0)?,
                 path: row.get(1)?,
@@ -197,8 +276,12 @@ impl Database {
     }
 
     pub fn delete_track(&self, id: i64) -> Result<()> {
+        let previous = self.get_track(id)?;
         self.conn
             .execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+        if let Some(previous) = previous {
+            self.gc_orphaned_taxonomy(previous.artist_id, previous.album_id, previous.genre_id)?;
+        }
         Ok(())
     }
 
@@ -235,6 +318,17 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn row_exists(db: &Database, table: &str, id: i64) -> bool {
+        db.conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE id = ?1"),
+                params![id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+            > 0
+    }
 
     fn sample_track(path: &str) -> NewTrack {
         NewTrack {
@@ -274,6 +368,25 @@ mod tests {
             .get_or_create_album("Discovery", Some(other.id), Some(1999))
             .unwrap();
         assert_ne!(album_a.id, album_b.id);
+    }
+
+    #[test]
+    fn get_or_create_album_is_idempotent_with_no_artist() {
+        // SQL treats NULL as distinct from NULL for UNIQUE-constraint
+        // purposes, so `ON CONFLICT(title, artist_id) DO NOTHING` never
+        // fires when `artist_id` is None — a real, common case for
+        // compilations/"Various Artists" scans with no artist tag.
+        // Without the explicit existence check, this created a second,
+        // duplicate "Various" album row instead of reusing the first.
+        let db = Database::open_in_memory().unwrap();
+        let first = db.get_or_create_album("Various", None, Some(2001)).unwrap();
+        let second = db.get_or_create_album("Various", None, Some(2001)).unwrap();
+        assert_eq!(first.id, second.id);
+        let count: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM albums", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]
@@ -358,6 +471,92 @@ mod tests {
     }
 
     #[test]
+    fn update_track_removes_an_artist_album_genre_left_with_no_tracks() {
+        let db = Database::open_in_memory().unwrap();
+        let old_artist = db.get_or_create_artist("Old Artist").unwrap();
+        let old_album = db
+            .get_or_create_album("Old Album", Some(old_artist.id), None)
+            .unwrap();
+        let old_genre = db.get_or_create_genre("Old Genre").unwrap();
+        let mut track = sample_track("/music/one.flac");
+        track.artist_id = Some(old_artist.id);
+        track.album_id = Some(old_album.id);
+        track.genre_id = Some(old_genre.id);
+        let inserted = db.insert_track(&track, 1).unwrap();
+
+        let new_artist = db.get_or_create_artist("New Artist").unwrap();
+        let new_album = db
+            .get_or_create_album("New Album", Some(new_artist.id), None)
+            .unwrap();
+        let new_genre = db.get_or_create_genre("New Genre").unwrap();
+        let mut retagged = sample_track("/music/one.flac");
+        retagged.artist_id = Some(new_artist.id);
+        retagged.album_id = Some(new_album.id);
+        retagged.genre_id = Some(new_genre.id);
+        db.update_track(inserted.id, &retagged).unwrap();
+
+        // Retagging this, the only track under the old artist/album/
+        // genre, must not leave them behind as permanent zero-track
+        // "ghost" rows that Browse would otherwise show forever.
+        assert!(!row_exists(&db, "artists", old_artist.id));
+        assert!(!row_exists(&db, "albums", old_album.id));
+        assert!(!row_exists(&db, "genres", old_genre.id));
+    }
+
+    #[test]
+    fn update_track_keeps_an_artist_album_genre_still_used_by_another_track() {
+        let db = Database::open_in_memory().unwrap();
+        let artist = db.get_or_create_artist("Shared Artist").unwrap();
+        let album = db
+            .get_or_create_album("Shared Album", Some(artist.id), None)
+            .unwrap();
+        let genre = db.get_or_create_genre("Shared Genre").unwrap();
+        let mut track_a = sample_track("/music/a.flac");
+        track_a.artist_id = Some(artist.id);
+        track_a.album_id = Some(album.id);
+        track_a.genre_id = Some(genre.id);
+        db.insert_track(&track_a, 1).unwrap();
+        let mut track_b = sample_track("/music/b.flac");
+        track_b.artist_id = Some(artist.id);
+        track_b.album_id = Some(album.id);
+        track_b.genre_id = Some(genre.id);
+        let inserted_b = db.insert_track(&track_b, 2).unwrap();
+
+        // Retagging track B away must not remove artist/album/genre rows
+        // that track A still legitimately references.
+        let mut retagged = sample_track("/music/b.flac");
+        retagged.artist_id = None;
+        retagged.album_id = None;
+        retagged.genre_id = None;
+        db.update_track(inserted_b.id, &retagged).unwrap();
+
+        assert!(row_exists(&db, "artists", artist.id));
+        assert!(row_exists(&db, "albums", album.id));
+        assert!(row_exists(&db, "genres", genre.id));
+    }
+
+    #[test]
+    fn delete_track_removes_an_artist_album_genre_left_with_no_tracks() {
+        let db = Database::open_in_memory().unwrap();
+        let artist = db.get_or_create_artist("Solo Artist").unwrap();
+        let album = db
+            .get_or_create_album("Solo Album", Some(artist.id), None)
+            .unwrap();
+        let genre = db.get_or_create_genre("Solo Genre").unwrap();
+        let mut track = sample_track("/music/one.flac");
+        track.artist_id = Some(artist.id);
+        track.album_id = Some(album.id);
+        track.genre_id = Some(genre.id);
+        let inserted = db.insert_track(&track, 1).unwrap();
+
+        db.delete_track(inserted.id).unwrap();
+
+        assert!(!row_exists(&db, "artists", artist.id));
+        assert!(!row_exists(&db, "albums", album.id));
+        assert!(!row_exists(&db, "genres", genre.id));
+    }
+
+    #[test]
     fn tracks_for_scan_diff_filters_by_path_prefix() {
         let db = Database::open_in_memory().unwrap();
         db.insert_track(&sample_track("/music/albums/a.flac"), 1)
@@ -384,5 +583,34 @@ mod tests {
         let rows = db.tracks_for_scan_diff("/music/100%_mix/").unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].path, "/music/100%_mix/a.flac");
+    }
+
+    #[test]
+    fn tracks_for_scan_diff_does_not_match_a_sibling_root_sharing_a_string_prefix() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_track(&sample_track("/home/user/Music/a.flac"), 1)
+            .unwrap();
+        db.insert_track(&sample_track("/home/user/MusicOld/b.flac"), 2)
+            .unwrap();
+
+        // "/home/user/Music" is a plain string prefix of
+        // "/home/user/MusicOld/b.flac" but not a real ancestor directory
+        // of it — a bare `LIKE '<prefix>%'` would incorrectly match both,
+        // which would make a rescan (or a scan-root removal) of the
+        // former destroy the latter's tracks too.
+        let rows = db.tracks_for_scan_diff("/home/user/Music").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, "/home/user/Music/a.flac");
+    }
+
+    #[test]
+    fn tracks_for_scan_diff_matches_a_track_whose_path_is_exactly_the_root() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_track(&sample_track("/music/single-file.flac"), 1)
+            .unwrap();
+
+        let rows = db.tracks_for_scan_diff("/music/single-file.flac").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, "/music/single-file.flac");
     }
 }
