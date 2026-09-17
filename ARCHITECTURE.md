@@ -2025,6 +2025,102 @@ the frontend coverage gap above (targeted greps, not exhaustive
 line-by-line reading of every `.tsx` file) is a real, stated limit on
 what was actually checked.
 
+## Phase 17: release readiness
+
+Final phase: `ARCHITECTURE.md`/`README.md` finalized, a real packaged
+build produced, and that packaged build (not just the dev/`cargo build`
+binary already verified in Phase 14) smoke-tested end to end.
+
+**Two small doc-adjacent fixes first**: the bundle identifier
+`com.omarchyplayer.app` triggered a build-time warning (`.app` conflicts
+with the macOS bundle extension convention, even though this app doesn't
+target macOS) — renamed to `com.omarchyplayer.amp`. `bundle.targets` was
+`"all"`, which on this Arch-based system attempts `deb`/`rpm` bundling
+tooling that doesn't exist here at all; narrowed to `["appimage"]`, the
+one Linux target that's both universal and buildable without a
+foreign distro's packaging tools — satisfying the plan's "AppImage or
+Arch/Omarchy package" choice with the more portable of the two.
+
+**Packaging surfaced a real, functional bug no earlier phase's testing
+had reason to catch**: the first successful AppImage build launched,
+rendered its window correctly, but logged `audio backend failed to
+initialize ... Failed to find element factory with name 'playbin3'` and
+showed "Audio unavailable" in the mini-player — a completely silent
+regression from every previous phase's on-device testing, which always
+ran the dev binary directly against the _host's_ system-installed
+GStreamer, never the bundled one. Root cause: `linuxdeploy`'s default
+library scanning walks the binary's `ldd` output, which only sees
+`libgstreamer-1.0.so` itself (the direct link dependency) — GStreamer's
+actual codec/playback plugins (`libgstplayback.so`, which provides
+`playbin3`, and everything else) are loaded via `dlopen` from a plugin
+registry at runtime, invisible to any dependency-walking scan. Fixed via
+`bundle.linux.appimage.bundleMediaFramework: true` in
+`tauri.conf.json`, which runs `linuxdeploy`'s dedicated `gstreamer`
+input plugin to explicitly copy the whole plugin directory (270 `.so`
+files in the rebuilt bundle) rather than relying on dependency
+inference. **General lesson**: a packaging step that dependency-scans a
+binary can silently drop anything the app loads dynamically rather than
+links against — any Rust crate wrapping a plugin-based native library
+(GStreamer, GTK modules, PAM, etc.) needs its packaging story to
+explicitly enumerate and bundle that plugin set, not trust the same
+scanner that correctly handles ordinary linked `.so` dependencies.
+
+**Three host-toolchain obstacles hit getting `linuxdeploy` to run at
+all on this specific machine** (a rolling-release Arch/Omarchy system
+ahead of the AppImage tooling ecosystem's own assumptions) — each
+verified as a genuine tooling/environment mismatch, not an Amp code
+issue, before working around it:
+
+1. `patchelf` wasn't installed and needs root via `pacman` (unavailable
+   in this session — no passwordless sudo, consistent with the
+   `cargo-audit` install earlier in Phase 16). Installed instead via
+   `pip install --user patchelf`, which ships a prebuilt Linux binary in
+   its PyPI wheel — no root needed.
+2. `linuxdeploy`'s own bundled `strip` binary doesn't understand the
+   RELR relocation format (`.relr.dyn` sections) Arch's current
+   toolchain produces, failing on every single bundled library with
+   "unknown type" errors. Worked around with `NO_STRIP=1` (a documented
+   `linuxdeploy` environment variable), trading a slightly larger
+   AppImage for a build that completes at all.
+3. `linuxdeploy-plugin-gtk` tries to copy gdk-pixbuf's external loader
+   `.so` modules from `<libdir>/gdk-pixbuf-2.0/2.10.0/`, a directory
+   that **does not exist** on this system's `gdk-pixbuf2` 2.44.7 —
+   confirmed via `pkgconf`/reading the real `.pc` file, not assumed —
+   because Arch has moved to `glycin`, GNOME's newer sandboxed
+   out-of-process image-loading service, which registers no loader
+   `.so` files via the old mechanism at all
+   (`gdk-pixbuf-query-loaders` returns a valid-but-empty result).
+   Worked around with a `PKG_CONFIG_PATH`-prepended override `.pc` file
+   redefining `gdk_pixbuf_binarydir` to an empty, writable directory —
+   `linuxdeploy-plugin-gtk`'s copy step only needs somewhere to copy
+   _from_ to proceed; this app never renders through GTK image widgets
+   that would need real loader modules bundled (WebKitGTK does its own
+   image decoding internally). This is a structural gap between the
+   AppImage tooling ecosystem (built assuming gdk-pixbuf's older
+   external-module architecture) and any current GNOME-stack Linux
+   distribution using `glycin` — worth remembering for any future
+   AppImage packaging on this class of system, not just this app.
+
+**Smoke-tested the actual packaged artifact**, not just the dev build a
+14th time: launched the real `Amp_0.1.0_amd64.AppImage` via
+`--appimage-extract-and-run`, confirmed its window mapped and rendered
+correctly under Hyprland (`hyprctl clients` + a real `grim` screenshot),
+and — since interactive on-device automation is known-flaky whenever
+this desktop is otherwise in use (per the established
+`feedback-interactive-testing` lesson, and this session had exactly that
+problem: `wtype`/Ctrl+K keyboard events weren't reliably reaching the
+freshly-launched window) — verified the actual fix deterministically
+instead of fighting flaky UI automation: `gst-inspect-1.0 playbin3` run
+with the AppImage's own `GST_PLUGIN_SYSTEM_PATH_1_0` resolved the real
+element factory from the bundle's `libgstplayback.so`, closing the loop
+with a direct, reproducible check rather than inferring success from a
+log's silence alone. **General lesson reinforced**: when interactive
+verification is unreliable, look for a deterministic, non-UI way to
+prove the same fact (here: ask the exact library the app depends on
+whether it resolves the failing symbol, using the app's own exact
+runtime environment) rather than retrying flaky automation or accepting
+weaker evidence.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

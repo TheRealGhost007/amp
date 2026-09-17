@@ -262,4 +262,23 @@ plan file's existence means work happened.
       (RUSTSEC-2024-0429, transitive via `gstreamer-rs`) isn't fixable
       from this repo. See ARCHITECTURE.md for full findings and stated
       coverage gaps.
-- [ ] **Phase 17 — Release Readiness**.
+- [x] **Phase 17 — Release Readiness**: fixed the bundle identifier
+      (`.app` suffix conflicted with macOS bundle conventions) and
+      narrowed `bundle.targets` to `["appimage"]` (the portable choice
+      on this Arch-based system, where `deb`/`rpm` tooling doesn't
+      exist). Packaging surfaced a real bug no prior phase's testing
+      could have caught: the AppImage silently shipped without any
+      GStreamer plugins (`playbin3` included) because `linuxdeploy`'s
+      dependency-scan only sees direct link dependencies, not
+      `dlopen`-loaded plugins — fixed with `bundleMediaFramework: true`.
+      Three host-toolchain-only obstacles (missing `patchelf`, an
+      outdated bundled `strip` vs. Arch's RELR relocations, and
+      `linuxdeploy-plugin-gtk` assuming gdk-pixbuf's old external-loader
+      layout vs. Arch's `glycin`-based one) worked around without
+      touching Amp's own code. Smoke-tested the real packaged
+      AppImage: window renders correctly under Hyprland, and
+      `gst-inspect-1.0 playbin3` confirmed the fix resolves from the
+      bundle's own plugin set (deterministic verification, not just
+      absence of a logged error, since interactive on-device automation
+      was unreliable this session). See ARCHITECTURE.md and README.md's
+      new "Packaging" section for full details.
