@@ -1,0 +1,45 @@
+.op-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  height: 32px;
+  flex-shrink: 0;
+  background: var(--bg-dimmer);
+  border-bottom: 1px solid var(--border);
+  /* The drag region makes the whole bar act like a native title bar for
+   * moving the window; user-select would otherwise let a click-drag here
+   * highlight the title text instead of dragging. */
+  user-select: none;
+}
+
+.op-titlebar__title {
+  font-size: var(--text-caption);
+  font-weight: var(--font-weight-medium);
+  color: var(--fg-muted);
+}
+
+.op-titlebar__close {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 32px;
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.op-titlebar__close:hover {
+  background: var(--danger);
+  color: var(--on-accent);
+}
+
+.op-titlebar__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}

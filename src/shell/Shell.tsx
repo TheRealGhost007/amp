@@ -17,6 +17,7 @@ import { PlayerDock } from "../player/PlayerDock";
 import { GlobalDialogs } from "./GlobalDialogs";
 import { CommandPalette } from "../palette/CommandPalette";
 import { GlobalShortcuts } from "../keyboard/GlobalShortcuts";
+import { TitleBar } from "./TitleBar";
 import "./Shell.css";
 
 const SIDEBAR_COLLAPSED_KEY = "appearance.sidebar_collapsed";
@@ -60,6 +61,7 @@ export function Shell() {
 
   return (
     <div className="op-shell">
+      <TitleBar />
       <div className="op-shell__body">
         <Sidebar
           activeView={activeView}
