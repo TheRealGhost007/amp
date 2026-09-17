@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Dropdown, Toggle } from "../components";
-import { applyTheme, type ThemeMode } from "../lib/theme";
+import { changeTheme, THEME_SETTING_KEY, type ThemeMode } from "../lib/theme";
 import { settings } from "../lib/ipc";
 import { AudioSettings } from "./AudioSettings";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
@@ -17,7 +17,6 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "amoled-dark", label: "AMOLED Dark" },
 ];
 
-const THEME_SETTING_KEY = "appearance.theme_mode";
 /** Mirrors `src-tauri::mpris::NOTIFICATIONS_SETTING_KEY` — the Rust tick
  * loop reads this same key before firing a track-change notification. */
 const NOTIFICATIONS_SETTING_KEY = "notifications.track_change_enabled";
@@ -37,10 +36,10 @@ export function Settings() {
     settings
       .get<ThemeMode>(THEME_SETTING_KEY)
       .then((saved) => {
-        if (saved) {
-          setThemeMode(saved);
-          applyTheme(saved);
-        }
+        // App.tsx's own startup init already applied and is watching
+        // this — this effect only needs the value to show the dropdown
+        // in the right state, not to re-apply it.
+        if (saved) setThemeMode(saved);
       })
       .catch(() => {
         // Settings persistence is best-effort in the UI: falling back to
@@ -57,8 +56,7 @@ export function Settings() {
   function handleThemeChange(value: string) {
     const mode = value as ThemeMode;
     setThemeMode(mode);
-    applyTheme(mode);
-    settings.set(THEME_SETTING_KEY, mode).catch(() => {});
+    changeTheme(mode);
   }
 
   function handleNotifyOnTrackChangeChange(checked: boolean) {

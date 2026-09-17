@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { ToastProvider } from "./components";
 import { LibraryProvider } from "./context/LibraryContext";
 import { applyStoredAudioPreferences } from "./lib/audioPreferences";
+import { initializeTheme } from "./lib/theme";
 import { Shell } from "./shell/Shell";
 import { useFavoritesStore } from "./store/favoritesStore";
 import { useKeyboardShortcutsStore } from "./store/keyboardShortcutsStore";
@@ -22,6 +23,11 @@ function App() {
     void useFavoritesStore.getState().init();
     void useKeyboardShortcutsStore.getState().init();
     void applyStoredAudioPreferences();
+    // main.tsx applies a synchronous "system" placeholder before this
+    // can even run, purely to avoid a flash of default browser styling
+    // before the real saved theme can be read over IPC — this is what
+    // actually restores it (and starts keeping "Match system" live).
+    void initializeTheme();
     usePlaybackStore
       .getState()
       .init()
