@@ -17,6 +17,10 @@
   background: var(--surface);
 }
 
+.op-media-row:active {
+  background: var(--bg-dimmer);
+}
+
 .op-media-row--active {
   background: var(--surface);
 }

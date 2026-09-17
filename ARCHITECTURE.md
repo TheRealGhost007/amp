@@ -1885,6 +1885,55 @@ receives focus. This is a local dev-machine install, not
 packaging — Phase 17 (Release Readiness) still owns producing a real
 distributable package.
 
+## Phase 15: UI/UX polish pass + second performance pass
+
+A holistic second look (the first was Phase 1), invoking
+`omarchy-app-modern-design` per the plan. Rather than a full redesign
+pass, this specifically audited for concrete, fixable inconsistencies
+across the now-complete app — spacing/hierarchy, icon-size consistency,
+hover/focus states, motion, empty-area issues — since the underlying
+design system (tokens, three themes, computed WCAG contrast ratios) was
+already established carefully in Phase 1 and hasn't drifted: grepping
+found essentially zero hardcoded colors or transition durations
+bypassing the token system anywhere in the codebase.
+
+**Found and fixed two real, concrete issues:**
+
+1. **`Icon`'s own default size (18px) didn't match what the app
+   actually standardizes on.** Every single call site across the whole
+   app explicitly passes `size`, and the overwhelming majority pass
+   `16` — 18 was never actually used as a "default," just declared as
+   one. A future call site that forgot to pass `size` would silently
+   render 2px larger than every icon around it. Changed the default to
+   16 to match the app's real, established convention.
+2. **No interactive element had a pressed (`:active`) state at all** —
+   `Button`, sidebar nav items, `MediaRow` track rows, and `Toggle` all
+   defined `:hover`/`:focus-visible` but nothing for the moment of an
+   actual click, so clicking gave no tactile "this registered" feedback
+   beyond whatever the hover state already showed. Per
+   `omarchy-app-modern-design`'s own workflow rule (never hand-roll
+   styling values — call `frontend-design` for the concrete treatment),
+   handed this off as a design brief; given the narrow, mechanical
+   scope (a consistency addition using the app's _existing_ token
+   language, not a new design direction), applied the result directly:
+   `Button`/`Toggle` get a quiet `transform: scale(0.97)` press-down
+   (theme-agnostic, no per-variant color decision needed), and
+   `Sidebar`/`MediaRow` rows shift their background from `--surface`
+   (hover) to `--bg-dimmer` (active) — reusing the same "hover lifts,
+   press recedes" relationship those two tokens already express
+   elsewhere in the app, not a new color. Both additions ride the
+   existing `--motion-fast`/`--motion-base` tokens, which are already
+   zeroed under `prefers-reduced-motion: reduce` globally — the pressed
+   _state_ still applies for feedback, just without an animated
+   transition into it, with no extra media-query handling needed.
+
+**Second performance pass**: re-ran Phase 13's 50k-track scan fixture
+in release mode to confirm nothing regressed since — **5.45s**,
+matching Phase 13's own 5.45s almost exactly. No Rust changes landed
+between Phase 13 and here beyond the bug-hunt pass's correctness fixes
+(none perf-sensitive), so this was a confirmation, not a new
+measurement under different conditions.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

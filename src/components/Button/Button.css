@@ -11,12 +11,21 @@
   transition:
     background-color var(--motion-fast) var(--ease-out),
     border-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .op-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* A quiet press-down, not a bounce: every variant already has its own
+ * hover treatment, so pressed feedback shouldn't need a per-variant
+ * color decision — a small, theme-agnostic scale reads as "this
+ * registered" on any background without one. */
+.op-button:not(:disabled):active {
+  transform: scale(0.97);
 }
 
 .op-button--md {

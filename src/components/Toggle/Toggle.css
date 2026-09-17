@@ -21,12 +21,20 @@
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--border);
   cursor: pointer;
-  transition: background var(--motion-fast) var(--ease-out);
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .op-toggle[data-on="true"] {
   background: var(--accent);
   box-shadow: none;
+}
+
+/* Same quiet press-down as Button, kept consistent across every
+ * clickable control in the app. */
+.op-toggle:active {
+  transform: scale(0.96);
 }
 
 .op-toggle__thumb {

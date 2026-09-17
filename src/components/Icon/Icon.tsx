@@ -80,7 +80,12 @@ interface IconProps {
   title?: string;
 }
 
-export function Icon({ name, size = 18, className, title }: IconProps) {
+// Every current call site explicitly passes `size` — 16 is what the app
+// actually standardizes on almost everywhere (sidebar/menu/transport
+// icons), not 18. Aligning the default so a future caller that forgets
+// to pass `size` matches its neighbors instead of silently rendering
+// larger than everything around it.
+export function Icon({ name, size = 16, className, title }: IconProps) {
   const filled = name === "heart-filled";
   return (
     <svg

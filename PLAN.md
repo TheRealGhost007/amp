@@ -232,6 +232,17 @@ plan file's existence means work happened.
       keys and device switching unchanged from Phase 11/4's own
       findings (Quickshell handles the former; this machine has only
       one real output device for the latter). See ARCHITECTURE.md.
-- [ ] **Phase 15 — UI/UX Polish Pass + Second Performance Pass**.
+- [x] **Phase 15 — UI/UX Polish Pass + Second Performance Pass**:
+      holistic second look via `omarchy-app-modern-design`, confirming
+      the Phase 1 design system hasn't drifted (near-zero hardcoded
+      colors/durations bypassing tokens anywhere). Found and fixed two
+      real issues: `Icon`'s default size (18px) never matched the
+      app's actual 16px convention every call site already used;
+      Button/Sidebar/MediaRow/Toggle had hover and focus states but no
+      pressed (`:active`) feedback at all, fixed via `frontend-design`'s
+      guidance with a theme-agnostic press-down that reuses existing
+      tokens rather than new colors. Second performance pass re-ran
+      Phase 13's 50k-track fixture in release mode: 5.45s, matching
+      Phase 13's own number — no regression. See ARCHITECTURE.md.
 - [ ] **Phase 16 — Security Pass (§37)**.
 - [ ] **Phase 17 — Release Readiness**.

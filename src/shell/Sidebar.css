@@ -108,6 +108,14 @@
   color: var(--fg);
 }
 
+/* Hover lifts to --surface; a press recedes past it to --bg-dimmer —
+ * the same relationship those two tokens already have everywhere else
+ * (a raised surface vs. a recessed background), reused here instead of
+ * introducing a new color for "pressed." */
+.op-sidebar__item:active {
+  background: var(--bg-dimmer);
+}
+
 .op-sidebar__item--active {
   background: var(--surface);
   color: var(--accent);
