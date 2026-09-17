@@ -7,7 +7,11 @@
 
 .op-sidebar {
   --sidebar-width: 224px;
-  --sidebar-width-collapsed: 64px;
+  /* Wide enough that a centered icon (plus its hover/active highlight,
+   * which fills the item's own box) reads as sitting inside the rail
+   * with real margin on both sides, not flush against the window edge
+   * on one side and the content divider on the other. */
+  --sidebar-width-collapsed: 72px;
 
   width: var(--sidebar-width);
   flex-shrink: 0;
@@ -40,7 +44,7 @@
  * `.op-sidebar--collapsed .op-sidebar__item`'s own override below. */
 .op-sidebar--collapsed .op-sidebar__header {
   justify-content: center;
-  padding: 0;
+  padding: 0 var(--space-xs);
 }
 
 .op-sidebar__brand {
@@ -112,4 +116,13 @@
 .op-sidebar--collapsed .op-sidebar__item {
   justify-content: center;
   padding: 0;
+  /* Not `width: 100%` (the expanded-state default): the item's own
+   * hover/active background fills its full box, so a full-width item
+   * made that highlight span almost the entire rail edge-to-edge —
+   * centering was correct on paper but didn't look it. A compact,
+   * centered button (`margin: auto` against the still-full-width `<li>`)
+   * gives the highlight itself real, visible margin from both edges,
+   * matching the header's already-compact collapse-toggle button. */
+  width: 44px;
+  margin: 0 auto;
 }
