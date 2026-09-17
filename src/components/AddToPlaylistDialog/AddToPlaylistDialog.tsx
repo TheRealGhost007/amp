@@ -22,12 +22,18 @@ export function AddToPlaylistDialog({
 }: AddToPlaylistDialogProps) {
   const playlists = usePlaylistsStore((s) => s.items);
   const createPlaylist = usePlaylistsStore((s) => s.create);
+  const refreshPlaylists = usePlaylistsStore((s) => s.refresh);
   const { show } = useToast();
   const [newName, setNewName] = useState("");
 
   async function addTo(playlistId: number, playlistName: string) {
     if (trackId === null) return;
     await playlistsApi.addTrack(playlistId, trackId);
+    // playlistsApi.addTrack is a raw IPC call, bypassing the store
+    // entirely — without this, the Playlists overview's `track_count`
+    // for this playlist stayed stale (off by one, too low) until some
+    // unrelated action happened to trigger a refresh.
+    void refreshPlaylists();
     show(`Added to ${playlistName}`, "success");
     onClose();
   }
