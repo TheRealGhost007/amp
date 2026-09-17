@@ -119,6 +119,49 @@ describe("Library search", () => {
     searchMock.mockReset();
   });
 
+  it("shows the full library by default, then debounced search results once the user types", async () => {
+    searchMock.mockResolvedValue([track(1, "Search Hit")]);
+    const user = userEvent.setup();
+    render(
+      <ToastProvider>
+        <Library />
+      </ToastProvider>,
+    );
+
+    // No query yet — the library's own listing shows, not a search result.
+    expect(screen.getByText("Existing Track")).toBeInTheDocument();
+    expect(searchMock).not.toHaveBeenCalled();
+
+    const input = screen.getByPlaceholderText("Search your library…");
+    await user.type(input, "hit");
+
+    // Debounce means the backend hasn't been asked yet right after typing.
+    expect(searchMock).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(searchMock).toHaveBeenCalledWith("hit"));
+    await waitFor(() => expect(screen.getByText("Search Hit")).toBeInTheDocument());
+    expect(screen.queryByText("Existing Track")).not.toBeInTheDocument();
+  });
+
+  it("clearing the query reverts to the full library listing", async () => {
+    searchMock.mockResolvedValue([track(1, "Search Hit")]);
+    const user = userEvent.setup();
+    render(
+      <ToastProvider>
+        <Library />
+      </ToastProvider>,
+    );
+
+    const input = screen.getByPlaceholderText("Search your library…");
+    await user.type(input, "hit");
+    await waitFor(() => expect(screen.getByText("Search Hit")).toBeInTheDocument());
+
+    await user.clear(input);
+
+    await waitFor(() => expect(screen.getByText("Existing Track")).toBeInTheDocument());
+    expect(screen.queryByText("Search Hit")).not.toBeInTheDocument();
+  });
+
   it("keeps the newer query's results even if the older query's reply arrives later", async () => {
     // Regression test: typing "cat" (search fires), then "cats" before
     // the first reply resolves, could show "cat"'s stale results if its
