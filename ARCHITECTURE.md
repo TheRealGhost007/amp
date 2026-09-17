@@ -1739,6 +1739,152 @@ conditional on MPRIS actually being available.
   > Library at their convenience (or on request), rather than an
   > automated destructive DB write during this pass.
 
+## Phase 14: testing & build quality gate (§36/§38)
+
+Two parts, landed as separate commits: filling in frontend test-suite
+gaps, then the full §38 checklist — production build through on-device
+verification. A user-requested full-codebase bug-hunt pass (its own
+section above) ran in between and took priority once it surfaced real
+bugs, which is why this phase's own commits bracket it rather than
+landing back-to-back.
+
+**Test-suite gaps**: audited existing coverage before writing anything
+— the Rust side already had extensive coverage from every prior phase's
+own TDD discipline (79+ tests in `player-core` alone at the time), so
+this focused on what the audit actually found missing: the four
+Settings views added in Phase 12 (Playback, Library, Audio, Keyboard)
+had zero test coverage beyond their underlying store, relying entirely
+on manual on-device verification; Library's search only had a
+race-condition regression test, never a basic happy-path one. Added six
+new test files plus two new Library tests, all real behavioral coverage
+(persistence round-trips, backend wiring, conflict detection) rather
+than padding.
+
+**§38 checklist — verified with real evidence, methodology noted
+per item rather than asserted wholesale**:
+
+- **Production build**: `npx tauri build --no-bundle`. Re-learned a
+  gotcha from Phase 13 the hard way a second time this session: a plain
+  `cargo build --release` does _not_ embed the frontend
+  (`frontendDist`) — that only happens via the `custom-protocol`
+  feature the Tauri CLI enables — so an early attempt at this loaded
+  `http://localhost:1420` and failed with "Connection refused" once the
+  dev server wasn't running.
+- **Test the production build**: launched the real release binary (not
+  dev) via its now-real desktop entry (`gtk-launch amp` — the same path
+  a user double-clicking it in an app launcher takes), confirmed with
+  `hyprctl activewindow`/`clients` that it actually received focus and
+  rendered, not just started.
+- **Scanning / large libraries**: not re-triggered fresh this pass —
+  the running production instance already had 14 real tracks scanned
+  in across two real roots (confirmed via direct DB inspection), and
+  Phase 13's 50k-file fixture re-run (5.45s, release mode) already
+  covers the scale question. Re-deriving both from scratch here would
+  have re-proven what's already proven.
+- **Playback / MPRIS**: searched the command palette for a real scanned
+  track ("MOTTO") and played it for real. Confirmed via `busctl` (an
+  independent D-Bus client, not app-internal state) that
+  `PlaybackStatus`/`Metadata`/`Position` all tracked the real pipeline
+  correctly, and confirmed the Phase-13-fixed track-change desktop
+  notification fired with the correct title.
+- **Missing/corrupt files**: not re-exercised interactively this pass —
+  `scan_skips_corrupt_file_but_keeps_going`,
+  `scan_detects_deleted_file`, and
+  `scan_detects_deleted_file_and_removes_its_cached_artwork` (the
+  bug-hunt pass's own new coverage) already exercise this directly and
+  precisely; a fresh interactive repro would test the exact same code
+  path with strictly less precision.
+- **App restart / persistence**: killed the running production
+  instance and relaunched it via the desktop entry — library (14
+  tracks), both scan roots, and both favorited tracks' heart icons all
+  came back exactly as they were beforehand.
+- **Media keys**: still true from Phase 11 — Omarchy's own Hyprland
+  binds route `XF86Audio*` through Quickshell's built-in MPRIS client,
+  and this pass's own fresh MPRIS verification (above) confirms the
+  service is still registering and responding correctly, which is the
+  entire mechanism media keys depend on.
+- **Device switching**: unchanged known limitation — this development
+  machine has exactly one real audio output device, so "switching
+  between two real devices doesn't interrupt playback" still can't be
+  exercised live here; deferred to whenever a second device is on hand,
+  same as every prior phase that hit this.
+
+On-device testing methodology note, worth recording since it shaped how
+this pass was done: earlier in this same session, blind `wtype`
+keyboard automation collided badly with the developer actively using
+the machine (Discord notifications stealing window focus mid-sequence)
+— see the `feedback-interactive-testing` memory for the full incident.
+This pass deliberately checked `hyprctl activewindow` immediately
+before every automated interaction rather than assuming focus, and
+used single, purposeful actions (one search, one Enter) instead of long
+blind sequences, precisely to avoid repeating that.
+
+## Post-Phase-14 user-requested fixes
+
+A cluster of small, independent fixes the user asked for directly while
+reviewing the bug-hunt pass and Phase 14's on-device testing, landed as
+separate commits since each is its own logical change:
+
+**Custom title bar.** The user wanted the native OS window chrome
+replaced with a custom one carrying only a close button, not the usual
+minimize/maximize/close trio. `decorations: false` in `tauri.conf.json`
+plus a new `TitleBar` component; `data-tauri-drag-region` (a plain HTML
+attribute the webview shell recognizes directly, no JS needed) makes
+the bar itself draggable exactly like a native title bar. Needed two
+new capability permissions the default set didn't require before
+removing native decorations: `core:window:allow-close` and
+`core:window:allow-start-dragging`.
+
+**Collapsed sidebar spacing, round two.** The bug-hunt pass's own
+centering fix (see that section above) was mathematically correct but
+the user reported it still looked cramped in practice. The real issue
+wasn't alignment — a full-width (`width: 100%`) collapsed nav item
+means its own hover/active background fills almost the entire rail
+edge-to-edge regardless of how well-centered the icon inside it is.
+Widened the collapsed rail 64px → 72px and made each collapsed item a
+compact, `margin: auto`-centered 44px button instead of a full-width
+one, so the highlight box itself — not just the icon — now has real,
+visible margin from both edges.
+
+**Theme not applying on startup.** `main.tsx` calls
+`applyTheme("system")` synchronously before React even mounts, purely
+to avoid a flash of default browser styling before the real saved
+setting can be read asynchronously over IPC — but nothing ever
+corrected that placeholder to the user's actual choice except
+`Settings.tsx`'s own mount effect. Any non-default theme (e.g. AMOLED
+Dark) only ever took effect once the user happened to navigate into
+Settings; the rest of the app launched with the wrong theme every time
+until then. Centralized theme-changing into `lib/theme.ts`:
+`initializeTheme()` (called once from `App.tsx`'s init effect,
+alongside every other startup-restoration call) restores the real
+saved mode immediately, and `changeTheme()` is what Settings' dropdown
+now calls instead of duplicating the apply-and-persist logic itself.
+This also fixed a related dormant bug found while touching the same
+code: `watchSystemTheme` (the "keep resolved theme synced with a live
+OS preference change while 'Match system' is selected" watcher) was
+fully implemented since Phase 1 but never actually invoked from
+anywhere, so switching OS theme mid-session never updated the app even
+with "Match system" selected. Both paths now go through one
+`setActiveTheme` that tears down and re-establishes the watcher on
+every call, so switching away from "system" can never leave a stale
+watcher from a previous mode still reacting to OS changes it shouldn't.
+Surfaced a real, unrelated test-infra gap while adding coverage: jsdom
+doesn't implement `window.matchMedia` at all, so any component
+touching theme resolution previously crashed in tests with no stub —
+added a no-op default to the shared Vitest setup file.
+
+**Installed as a real desktop app.** The user didn't want to run this
+from a terminal. Built a real production release binary and added a
+standard XDG desktop entry (`~/.local/share/applications/amp.desktop`,
+icon copied into the `hicolor` theme tree, `update-desktop-database`/
+`gtk-update-icon-cache` refreshed) pointing at the built binary —
+verified end-to-end by launching through `gtk-launch amp` (the same
+resolution path a real app-launcher menu entry takes, not a manual
+binary invocation) and confirming the window actually renders and
+receives focus. This is a local dev-machine install, not
+packaging — Phase 17 (Release Readiness) still owns producing a real
+distributable package.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

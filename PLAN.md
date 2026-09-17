@@ -213,7 +213,25 @@ plan file's existence means work happened.
       `cargo build --release`) and memory (~200MB RSS, mostly
       WebKitGTK's own baseline) — both comfortably reasonable. See
       ARCHITECTURE.md.
-- [ ] **Phase 14 — Testing & Build Quality Gate (§36/§38)**.
+- [x] **Phase 14 — Testing & Build Quality Gate (§36/§38)**: filled real
+      test-suite gaps the audit actually found (the four Phase 12
+      Settings views had zero coverage beyond their store; Library
+      search only had a race-condition test, never a happy-path one) —
+      not padding, real behavioral coverage. A user-requested
+      full-codebase bug-hunt pass (17 findings, 13 fixed) ran in
+      between and took priority once it surfaced real bugs. §38's
+      checklist then ran against a real production build launched via
+      a real desktop entry (not `cargo run`/dev server): scanning/large
+      libraries and missing/corrupt files verified via existing DB
+      state + the Rust test suite's own precise coverage rather than
+      re-deriving what's already proven; playback/MPRIS verified with a
+      real track played and independently confirmed via `busctl`, track-
+      change notification included; app restart/persistence verified by
+      actually killing and relaunching the production instance and
+      confirming library, scan roots, and favorites all survived. Media
+      keys and device switching unchanged from Phase 11/4's own
+      findings (Quickshell handles the former; this machine has only
+      one real output device for the latter). See ARCHITECTURE.md.
 - [ ] **Phase 15 — UI/UX Polish Pass + Second Performance Pass**.
 - [ ] **Phase 16 — Security Pass (§37)**.
 - [ ] **Phase 17 — Release Readiness**.
