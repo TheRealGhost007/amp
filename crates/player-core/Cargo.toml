@@ -3,6 +3,7 @@ name = "player-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+license.workspace = true
 description = "Library database, scanning, metadata, search, playlists, favorites, history, settings — no Tauri or audio-backend awareness"
 
 [dependencies]

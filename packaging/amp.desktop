@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Amp
+Comment=A premium, native music player for Omarchy Linux
+Exec=omarchy-player
+Icon=amp
+Terminal=false
+Categories=Audio;Music;Player;AudioVideo;
+StartupWMClass=omarchy-player

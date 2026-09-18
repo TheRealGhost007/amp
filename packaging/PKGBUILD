@@ -1,0 +1,37 @@
+# Maintainer: TheRealGhost007
+pkgname=amp-player
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A premium, native music player for Omarchy Linux"
+arch=('x86_64')
+url="https://github.com/TheRealGhost007/amp"
+license=('GPL-3.0-or-later')
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'gstreamer'
+  'gst-plugins-base'
+  'gst-plugins-good'
+  'gst-plugin-pipewire'
+  'json-glib'
+)
+makedepends=('rust' 'nodejs' 'npm')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/TheRealGhost007/amp/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "amp-$pkgver"
+  npm ci
+  npm run tauri build -- --no-bundle
+}
+
+package() {
+  cd "amp-$pkgver"
+  install -Dm755 target/release/omarchy-player "$pkgdir/usr/bin/omarchy-player"
+  install -Dm644 packaging/amp.desktop "$pkgdir/usr/share/applications/amp.desktop"
+  install -Dm644 src-tauri/icons/128x128.png \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/amp.png"
+  install -Dm644 "src-tauri/icons/128x128@2x.png" \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/amp.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

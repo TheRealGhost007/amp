@@ -7,6 +7,27 @@ A premium, native music player for Omarchy Linux (repo/crate name
 Not a Spotify clone. See `ARCHITECTURE.md` for the stack decisions and
 rejected alternatives, and `PLAN.md` for the phased build plan.
 
+Fully offline: Amp has no network code anywhere in it (confirmed via a
+dedicated security audit — see `ARCHITECTURE.md`'s Phase 16 section) —
+it reads your local music files and writes to its own local SQLite
+database, nothing else.
+
+## Installation
+
+**AppImage** (works on any Linux distro, bundles its own dependencies):
+download the latest `Amp_<version>_amd64.AppImage` from
+[Releases](https://github.com/TheRealGhost007/amp/releases), `chmod +x`
+it, and run it.
+
+**Arch / Omarchy**, building a real system package against your
+already-installed libraries (much smaller than the AppImage, no bundled
+copies of WebKitGTK/GStreamer):
+
+```
+cd packaging
+makepkg -si
+```
+
 ## Development
 
 ```
