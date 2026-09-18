@@ -1,5 +1,6 @@
 pub mod favorites;
 pub mod history;
+pub mod images;
 pub mod library;
 pub mod metadata;
 pub mod player;

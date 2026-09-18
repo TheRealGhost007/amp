@@ -225,6 +225,10 @@ export const settings = {
   set: <T>(key: string, value: T) => invoke<void>("set_setting", { key, value }),
 };
 
+export const images = {
+  readAsDataUrl: (path: string) => invoke<string>("read_image_as_data_url", { path }),
+};
+
 export function onPlayerEvent(
   handler: (event: PlayerEvent) => void,
 ): Promise<UnlistenFn> {

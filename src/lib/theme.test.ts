@@ -1,16 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const getMock = vi.fn();
+// Routed by key rather than one blanket resolved value: `initializeTheme`
+// now reads THEME_SETTING_KEY, and — independently — always also checks
+// BACKGROUND_IMAGE_SETTING_KEY (and CUSTOM_THEME_SETTING_KEY when the
+// saved mode is "custom"). A single shared mocked value across all three
+// would make a saved theme *mode* string get misread as an image *path*.
+const settingsStore = new Map<string, unknown>();
+const getMock = vi.fn((key: string) => Promise.resolve(settingsStore.get(key) ?? null));
 const setMock = vi.fn();
+const readAsDataUrlMock = vi.fn();
 
 vi.mock("./ipc", () => ({
   settings: {
-    get: (...args: unknown[]) => getMock(...args),
+    get: (key: string) => getMock(key),
     set: (...args: unknown[]) => setMock(...args),
+  },
+  images: {
+    readAsDataUrl: (...args: unknown[]) => readAsDataUrlMock(...args),
   },
 }));
 
-const { initializeTheme, changeTheme, THEME_SETTING_KEY } = await import("./theme");
+const {
+  initializeTheme,
+  changeTheme,
+  setBackgroundImage,
+  THEME_SETTING_KEY,
+  CUSTOM_THEME_SETTING_KEY,
+  BACKGROUND_IMAGE_SETTING_KEY,
+} = await import("./theme");
 
 function mockMatchMedia(initialMatches: boolean) {
   const state = { matches: initialMatches };
@@ -33,9 +50,13 @@ function mockMatchMedia(initialMatches: boolean) {
 
 describe("theme", () => {
   beforeEach(() => {
-    getMock.mockReset();
+    settingsStore.clear();
+    getMock.mockClear();
     setMock.mockReset().mockResolvedValue(undefined);
+    readAsDataUrlMock.mockReset();
     document.documentElement.dataset.theme = "";
+    document.body.style.background = "";
+    document.documentElement.style.cssText = "";
   });
 
   afterEach(() => {
@@ -44,7 +65,7 @@ describe("theme", () => {
 
   it("initializeTheme restores a previously saved fixed theme", async () => {
     mockMatchMedia(false);
-    getMock.mockResolvedValue("amoled-dark");
+    settingsStore.set(THEME_SETTING_KEY, "amoled-dark");
 
     await initializeTheme();
 
@@ -53,7 +74,6 @@ describe("theme", () => {
 
   it("initializeTheme falls back to resolved system theme when nothing was ever saved", async () => {
     mockMatchMedia(true);
-    getMock.mockResolvedValue(null);
 
     await initializeTheme();
 
@@ -62,7 +82,7 @@ describe("theme", () => {
 
   it("initializeTheme falls back to system when the setting read fails", async () => {
     mockMatchMedia(false);
-    getMock.mockRejectedValue(new Error("db unavailable"));
+    getMock.mockRejectedValueOnce(new Error("db unavailable"));
 
     await initializeTheme();
 
@@ -124,5 +144,201 @@ describe("theme", () => {
     media.fireChange();
 
     expect(document.documentElement.dataset.theme).toBe("omarchy-dark");
+  });
+});
+
+describe("custom theme", () => {
+  beforeEach(async () => {
+    settingsStore.clear();
+    getMock.mockClear();
+    setMock.mockReset().mockResolvedValue(undefined);
+    readAsDataUrlMock.mockReset();
+    document.documentElement.dataset.theme = "";
+    document.documentElement.style.cssText = "";
+    // `currentBackgroundImage`/`currentGradient` are module-level state
+    // in theme.ts (by design — a background image must survive a theme
+    // change independent of it), so they persist across test cases
+    // within this file unless explicitly cleared here.
+    await setBackgroundImage(null);
+    mockMatchMedia(false);
+  });
+
+  it("applies the picked base theme plus the accent and gradient as inline overrides", () => {
+    changeTheme("custom", {
+      base: "omarchy-dark",
+      gradientFrom: "#1a1a2e",
+      gradientTo: "#16213e",
+      angle: 135,
+      accent: "#e94560",
+    });
+
+    expect(document.documentElement.dataset.theme).toBe("omarchy-dark");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#e94560");
+    // jsdom's CSSOM normalizes hex colors it parses back out of a
+    // shorthand `background` value to rgb() — assert on the gradient's
+    // structure (angle + two distinct color stops), not the literal hex
+    // text, since jsdom's own normalization isn't this test's concern.
+    expect(document.body.style.background).toContain("linear-gradient(135deg");
+    expect(document.body.style.background).toContain("rgb(26, 26, 46)");
+    expect(document.body.style.background).toContain("rgb(22, 33, 62)");
+  });
+
+  it("persists both the mode and the custom config", () => {
+    const config = {
+      base: "omarchy-light" as const,
+      gradientFrom: "#ffffff",
+      gradientTo: "#000000",
+      angle: 90,
+      accent: "#336699",
+    };
+    changeTheme("custom", config);
+
+    expect(setMock).toHaveBeenCalledWith(THEME_SETTING_KEY, "custom");
+    expect(setMock).toHaveBeenCalledWith(CUSTOM_THEME_SETTING_KEY, config);
+  });
+
+  it("picks a dark label color for a light accent and a light label color for a dark accent", () => {
+    changeTheme("custom", {
+      base: "omarchy-dark",
+      gradientFrom: "#000",
+      gradientTo: "#000",
+      angle: 0,
+      accent: "#ffffff",
+    });
+    expect(document.documentElement.style.getPropertyValue("--on-accent")).toBe(
+      "#121212",
+    );
+
+    changeTheme("custom", {
+      base: "omarchy-dark",
+      gradientFrom: "#000",
+      gradientTo: "#000",
+      angle: 0,
+      accent: "#0a0a0a",
+    });
+    expect(document.documentElement.style.getPropertyValue("--on-accent")).toBe(
+      "#ffffff",
+    );
+  });
+
+  it("switching away from custom clears the accent/gradient overrides", () => {
+    changeTheme("custom", {
+      base: "omarchy-dark",
+      gradientFrom: "#111",
+      gradientTo: "#222",
+      angle: 45,
+      accent: "#abcdef",
+    });
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#abcdef");
+
+    changeTheme("omarchy-dark");
+
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
+    expect(document.body.style.background).toBe("");
+  });
+
+  it("initializeTheme restores a saved custom theme's config, not just its mode", async () => {
+    settingsStore.set(THEME_SETTING_KEY, "custom");
+    settingsStore.set(CUSTOM_THEME_SETTING_KEY, {
+      base: "omarchy-light",
+      gradientFrom: "#fafafa",
+      gradientTo: "#eaeaea",
+      angle: 180,
+      accent: "#ff6600",
+    });
+
+    await initializeTheme();
+
+    expect(document.documentElement.dataset.theme).toBe("omarchy-light");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#ff6600");
+    expect(document.body.style.background).toContain("180deg");
+  });
+
+  it("falls back to system if the mode is 'custom' but its config is missing", async () => {
+    settingsStore.set(THEME_SETTING_KEY, "custom");
+
+    await initializeTheme();
+
+    expect(document.documentElement.dataset.theme).toBe("omarchy-light");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
+  });
+});
+
+describe("custom background image", () => {
+  beforeEach(async () => {
+    settingsStore.clear();
+    getMock.mockClear();
+    setMock.mockReset().mockResolvedValue(undefined);
+    readAsDataUrlMock.mockReset();
+    document.documentElement.dataset.theme = "";
+    document.documentElement.style.cssText = "";
+    // Module-level state in theme.ts persists across test cases within
+    // this file — clear it, then reset the mocks again so this cleanup
+    // call itself doesn't show up in a test's own assertions.
+    await setBackgroundImage(null);
+    setMock.mockClear();
+    mockMatchMedia(false);
+  });
+
+  it("reads the picked file and applies it as body's background with a readability scrim", async () => {
+    readAsDataUrlMock.mockResolvedValue("data:image/png;base64,ZmFrZQ==");
+
+    await setBackgroundImage("/home/user/Pictures/wallpaper.png");
+
+    expect(readAsDataUrlMock).toHaveBeenCalledWith("/home/user/Pictures/wallpaper.png");
+    expect(document.body.style.background).toContain("data:image/png;base64,ZmFrZQ==");
+    expect(document.body.style.background).toContain("rgba(0, 0, 0, 0.55)");
+    expect(setMock).toHaveBeenCalledWith(
+      BACKGROUND_IMAGE_SETTING_KEY,
+      "/home/user/Pictures/wallpaper.png",
+    );
+  });
+
+  it("clearing the background image resets body's background to the stylesheet default", async () => {
+    readAsDataUrlMock.mockResolvedValue("data:image/png;base64,ZmFrZQ==");
+    await setBackgroundImage("/home/user/Pictures/wallpaper.png");
+
+    await setBackgroundImage(null);
+
+    expect(document.body.style.background).toBe("");
+    expect(setMock).toHaveBeenCalledWith(BACKGROUND_IMAGE_SETTING_KEY, null);
+  });
+
+  it("a background image takes priority over a custom theme's gradient", async () => {
+    changeTheme("custom", {
+      base: "omarchy-dark",
+      gradientFrom: "#111",
+      gradientTo: "#222",
+      angle: 45,
+      accent: "#abcdef",
+    });
+    expect(document.body.style.background).toContain("linear-gradient(45deg");
+
+    readAsDataUrlMock.mockResolvedValue("data:image/png;base64,ZmFrZQ==");
+    await setBackgroundImage("/wallpaper.png");
+
+    expect(document.body.style.background).toContain("data:image/png;base64,ZmFrZQ==");
+    expect(document.body.style.background).not.toContain("#111");
+  });
+
+  it("initializeTheme restores a previously set background image from disk", async () => {
+    settingsStore.set(BACKGROUND_IMAGE_SETTING_KEY, "/wallpaper.png");
+    readAsDataUrlMock.mockResolvedValue("data:image/png;base64,cmVzdG9yZWQ=");
+
+    await initializeTheme();
+
+    expect(readAsDataUrlMock).toHaveBeenCalledWith("/wallpaper.png");
+    expect(document.body.style.background).toContain("cmVzdG9yZWQ=");
+  });
+
+  it("a moved/deleted background image file fails initializeTheme silently, not blocking the theme itself", async () => {
+    settingsStore.set(THEME_SETTING_KEY, "omarchy-light");
+    settingsStore.set(BACKGROUND_IMAGE_SETTING_KEY, "/gone.png");
+    readAsDataUrlMock.mockRejectedValue(new Error("ENOENT"));
+
+    await expect(initializeTheme()).resolves.toBeUndefined();
+
+    expect(document.documentElement.dataset.theme).toBe("omarchy-light");
+    expect(document.body.style.background).toBe("");
   });
 });

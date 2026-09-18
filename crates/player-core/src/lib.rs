@@ -6,6 +6,7 @@
 
 pub mod db;
 pub mod error;
+pub mod images;
 pub mod metadata_editor;
 pub mod scan;
 

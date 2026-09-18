@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Dropdown, Toggle } from "../components";
-import { changeTheme, THEME_SETTING_KEY, type ThemeMode } from "../lib/theme";
+import { Toggle } from "../components";
 import { settings } from "../lib/ipc";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { AudioSettings } from "./AudioSettings";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
 import { LibrarySettings } from "./LibrarySettings";
@@ -9,13 +9,6 @@ import { PlaybackSettings } from "./PlaybackSettings";
 import { ViewHeader } from "./ViewHeader";
 import "./views.css";
 import "./Settings.css";
-
-const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
-  { value: "system", label: "Match system" },
-  { value: "omarchy-dark", label: "Omarchy Dark" },
-  { value: "omarchy-light", label: "Omarchy Light" },
-  { value: "amoled-dark", label: "AMOLED Dark" },
-];
 
 /** Mirrors `src-tauri::mpris::NOTIFICATIONS_SETTING_KEY` — the Rust tick
  * loop reads this same key before firing a track-change notification. */
@@ -29,22 +22,9 @@ const UPCOMING_SECTIONS = [
 ];
 
 export function Settings() {
-  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [notifyOnTrackChange, setNotifyOnTrackChange] = useState(true);
 
   useEffect(() => {
-    settings
-      .get<ThemeMode>(THEME_SETTING_KEY)
-      .then((saved) => {
-        // App.tsx's own startup init already applied and is watching
-        // this — this effect only needs the value to show the dropdown
-        // in the right state, not to re-apply it.
-        if (saved) setThemeMode(saved);
-      })
-      .catch(() => {
-        // Settings persistence is best-effort in the UI: falling back to
-        // the in-memory default is preferable to blocking the view.
-      });
     settings
       .get<boolean>(NOTIFICATIONS_SETTING_KEY)
       .then((saved) => {
@@ -52,12 +32,6 @@ export function Settings() {
       })
       .catch(() => {});
   }, []);
-
-  function handleThemeChange(value: string) {
-    const mode = value as ThemeMode;
-    setThemeMode(mode);
-    changeTheme(mode);
-  }
 
   function handleNotifyOnTrackChangeChange(checked: boolean) {
     setNotifyOnTrackChange(checked);
@@ -70,12 +44,7 @@ export function Settings() {
 
       <section className="op-settings-section">
         <h2 className="op-settings-section__title">Appearance</h2>
-        <Dropdown
-          label="Theme"
-          value={themeMode}
-          onChange={handleThemeChange}
-          options={THEME_OPTIONS}
-        />
+        <AppearanceSettings />
       </section>
 
       <section className="op-settings-section">

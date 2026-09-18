@@ -2221,6 +2221,82 @@ visible as `Library.tsx`'s pre-existing "Compilation Skipped:
 incompatible library" warning for `useVirtualizer`), which this
 component has no equivalent bailout for.
 
+## Post-Phase-17 custom themes and background images
+
+User-requested addition (spec §24): custom gradient/accent themes and a
+custom background image, both landing in Settings' Appearance section.
+
+**Custom theme scope, deliberately limited**: a custom theme lets the
+user pick a background gradient (two colors + angle) and an accent
+color, but reuses one of the built-in dark/light token sets for
+everything else (foreground, surfaces, borders) rather than exposing
+every color token. Two concrete reasons, not just caution for its own
+sake: `--bg-dim`/`--bg-dimmer`/`--surface` are each used as small,
+_solid_ panel backgrounds throughout the app (sidebar, title bar, menus,
+rows) — a gradient assigned there renders as dozens of independent,
+ugly mini-gradients rather than one cohesive backdrop, and
+`Artwork.css` specifically assigns `--bg-dim` via the `background-color`
+property, which cannot hold a gradient at all (the value is silently
+dropped, not an error). Keeping fg/surface/border on a proven base
+theme also means a user's own color choices can never make the whole
+app unreadable — the accent's own on-accent label color _is_ computed
+automatically (WCAG relative luminance, `src/lib/theme.ts`) to stay
+readable against whatever accent color is picked.
+
+**Where the gradient actually renders**: `body`'s background only
+(`global.css`'s existing `background: var(--bg)` rule, overridden via
+inline style from `theme.ts` when a custom theme or background image is
+active) — verified safe by checking that neither `.op-shell__main` nor
+any view sets its own background, so `body`'s background already shows
+through the whole main content area naturally; sidebar/title
+bar/menus/rows keep their own opaque solid panel colors on top,
+unaffected.
+
+**Background image is a one-shot data-URL read, not Tauri's asset
+protocol** — deliberately. The asset protocol (considered and rejected)
+needs a new Cargo feature, a new `tauri.conf.json` block, and grants the
+WebView a persistent, ever-growing set of servable file paths
+(`asset_protocol_scope().allow_file`) for every image a user ever picks.
+A plain `#[tauri::command]` that reads the file's bytes, base64-encodes
+them, and returns a `data:` URL (`player_core::images::read_as_data_url`,
+new `crates/player-core/src/images.rs`, capped at 20MB) has no such
+standing grant — nothing is ever servable to the WebView beyond the
+literal bytes returned for that one file, at the moment the user
+explicitly picked it via the native file dialog. This also resolves the
+"real artwork display needs an asset-protocol decision" gap flagged as
+deliberately deferred back in Phase 13 — not by building the asset
+protocol, but by establishing that a one-shot data-URL read covers this
+class of need without it.
+
+**Background image and the custom theme's gradient both want to control
+`body`'s background independently** (a user can set either without the
+other) — reconciled by one internal `applyBodyBackground()` in
+`theme.ts` that always recomputes the correct combined value: an
+explicit image always wins over a gradient (layering a photo under an
+unrelated color gradient makes no sense), a dark scrim always
+accompanies an image for text readability (this app has no way to
+WCAG-check an arbitrary user photo the way every built-in theme's own
+tokens are checked, so a fixed, generous scrim is the guardrail
+instead), and clearing both resets `body`'s inline style entirely so the
+stylesheet's own `background: var(--bg)` rule takes back over.
+
+Settings extracted into its own `AppearanceSettings.tsx` (matching
+every other section's own file, once this stopped being a single
+dropdown) — theme dropdown gains a "Custom" option revealing base/
+gradient/accent controls only while selected, plus an independent
+background-image picker (reuses the same
+`open({directory:false, filters:[...]})` native-dialog pattern
+`LibraryContext.tsx`'s folder picker already established, just for a
+single image file instead of a directory).
+
+Testing: `cargo test -p player-core` covers `images::read_as_data_url`
+(valid image, unsupported extension, oversized file, missing file — 4
+new tests); Vitest covers `theme.ts`'s custom-theme/background-image
+logic directly (18 tests total, including the interaction between the
+two and startup restoration) and `AppearanceSettings.tsx`'s own UI
+wiring (6 tests) separately, matching this project's established
+two-layer coverage (logic in the lib, wiring in the component).
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

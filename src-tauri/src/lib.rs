@@ -339,6 +339,7 @@ pub fn run() {
             commands::player::player_set_device,
             commands::settings::get_setting,
             commands::settings::set_setting,
+            commands::images::read_image_as_data_url,
             commands::library::library_add_folder,
             commands::library::library_list_scan_roots,
             commands::library::library_remove_scan_root,
