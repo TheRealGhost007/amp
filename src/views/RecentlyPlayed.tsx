@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { EmptyState, MediaRow } from "../components";
-import { history, pathToFileUri, type TrackListItem } from "../lib/ipc";
+import { history, type TrackListItem } from "../lib/ipc";
 import { buildTrackMenuItems } from "../lib/trackMenu";
 import { formatDuration } from "../lib/format";
+import { playListStartingAt } from "../lib/playFromList";
 import { useLibrary } from "../context/LibraryContext";
 import { useFavoritesStore } from "../store/favoritesStore";
 import { usePlaybackStore } from "../store/playbackStore";
@@ -15,18 +16,28 @@ export function RecentlyPlayed() {
   const [tracks, setTracks] = useState<TrackListItem[] | null>(null);
   const favoriteIds = useFavoritesStore((s) => s.ids);
   const toggleFavorite = useFavoritesStore((s) => s.toggle);
-  const playNow = usePlaybackStore((s) => s.playNow);
   const currentTrackId = usePlaybackStore((s) => s.currentTrack?.id);
   const refreshLibrary = useLibrary().refresh;
 
-  function refreshRecent() {
-    history.listRecent().then(setTracks);
-  }
+  // Tauri dispatches commands across a thread pool with no ordering
+  // guarantee, so two overlapping `listRecent` calls (e.g. removing two
+  // tracks from the library in quick succession, each triggering its
+  // own refresh) can resolve out of order — same shape of race already
+  // fixed once in LibraryContext's `seqRef`.
+  const seqRef = useRef(0);
+
+  const refreshRecent = useCallback(() => {
+    const seq = ++seqRef.current;
+    history.listRecent().then((items) => {
+      if (seq === seqRef.current) setTracks(items);
+    });
+  }, []);
 
   useEffect(() => {
+    const seq = ++seqRef.current;
     let cancelled = false;
     history.listRecent().then((items) => {
-      if (!cancelled) setTracks(items);
+      if (!cancelled && seq === seqRef.current) setTracks(items);
     });
     return () => {
       cancelled = true;
@@ -46,6 +57,8 @@ export function RecentlyPlayed() {
     );
   }
 
+  const displayedTracks = tracks ?? [];
+
   return (
     <div className="op-view">
       <ViewHeader
@@ -53,7 +66,19 @@ export function RecentlyPlayed() {
         subtitle={tracks === null ? "Loading…" : undefined}
       />
       <div className="op-recently-played__list">
-        {(tracks ?? []).map((track) => (
+        {/* eslint-disable-next-line react-hooks/refs -- false positive:
+            `refreshRecent` only reads `seqRef.current` inside its own
+            call body (triggered from a click handler) and inside a
+            `.then()` continuation, never synchronously during render.
+            Same useCallback+useRef seq-guard shape as PlaylistDetail.tsx
+            and LibraryContext.tsx, neither of which trip this rule;
+            PlaylistDetail.tsx's dnd-kit hooks appear to make the
+            compiler skip deep analysis of that component entirely
+            (visible separately as Library.tsx's own accepted
+            "Compilation Skipped: incompatible library" warning for
+            useVirtualizer), which this component has no equivalent
+            bailout for. Verified by bisection, not just assumed. */}
+        {displayedTracks.map((track, index) => (
           <MediaRow
             key={track.id}
             artworkSeed={`${track.artist_name ?? "Unknown Artist"} — ${track.album_title ?? track.title}`}
@@ -63,7 +88,7 @@ export function RecentlyPlayed() {
             active={track.id === currentTrackId}
             favorite={favoriteIds.has(track.id)}
             onToggleFavorite={() => void toggleFavorite(track.id)}
-            onClick={() => void playNow({ id: track.id, uri: pathToFileUri(track.path) })}
+            onClick={() => void playListStartingAt(displayedTracks, index)}
             actions={buildTrackMenuItems(track, {
               onRemovedFromLibrary: () => {
                 void refreshLibrary();

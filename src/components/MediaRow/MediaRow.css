@@ -63,6 +63,7 @@
 }
 
 .op-media-row:hover .op-media-row__favorite,
+.op-media-row__favorite:focus-visible,
 .op-media-row__favorite[aria-pressed="true"] {
   opacity: 1;
 }

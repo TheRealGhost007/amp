@@ -2,9 +2,9 @@ import { useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { EmptyState, MediaRow } from "../components";
 import { useLibrary } from "../context/LibraryContext";
-import { pathToFileUri } from "../lib/ipc";
 import { buildTrackMenuItems } from "../lib/trackMenu";
 import { formatDuration } from "../lib/format";
+import { playListStartingAt } from "../lib/playFromList";
 import { useFavoritesStore } from "../store/favoritesStore";
 import { usePlaybackStore } from "../store/playbackStore";
 import { ViewHeader } from "./ViewHeader";
@@ -18,7 +18,6 @@ export function Favorites() {
   const favoriteIds = useFavoritesStore((s) => s.ids);
   const favoritesLoading = useFavoritesStore((s) => s.loading);
   const toggleFavorite = useFavoritesStore((s) => s.toggle);
-  const playNow = usePlaybackStore((s) => s.playNow);
   const currentTrackId = usePlaybackStore((s) => s.currentTrack?.id);
 
   const favoriteTracks = useMemo(
@@ -82,7 +81,7 @@ export function Favorites() {
                   favorite
                   onToggleFavorite={() => void toggleFavorite(track.id)}
                   onClick={() =>
-                    void playNow({ id: track.id, uri: pathToFileUri(track.path) })
+                    void playListStartingAt(favoriteTracks, virtualRow.index)
                   }
                   actions={buildTrackMenuItems(track, {
                     onRemovedFromLibrary: () => void refresh(),

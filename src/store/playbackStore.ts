@@ -78,6 +78,14 @@ async function fetchFavoriteStatus(track: TrackRef | null): Promise<boolean> {
  * is ever allowed to stick, regardless of resolution order. */
 let trackMutationSeq = 0;
 let favoriteSeq = 0;
+// Independent per-control counters (never shared with each other) —
+// seek/volume/mute are unrelated axes, so an in-flight call on one must
+// never be invalidated by a call on another, only by a newer call to
+// that *same* control. `GlobalShortcuts`' key-repeat on held arrow keys
+// reliably produces exactly this kind of overlap.
+let seekSeq = 0;
+let volumeSeq = 0;
+let mutedSeq = 0;
 
 export const usePlaybackStore = create<PlaybackStore>((set, get) => {
   /** Shared body for `playNow`/`playPrevious`: applies the sequence-
@@ -230,29 +238,37 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => {
     },
 
     togglePlayPause: async () => {
-      const { isPlaying } = get();
-      if (isPlaying) {
-        await player.pause();
-        set({ isPlaying: false });
-      } else {
-        await player.resume();
-        set({ isPlaying: true });
-      }
+      // Flips the displayed state synchronously, before the IPC call,
+      // rather than reading `isPlaying` again after an `await` — two
+      // rapid presses (the single most-mashed control in a media
+      // player) previously both read the same pre-await value and sent
+      // the *same* command twice (e.g. two `pause()`s, no `resume()`),
+      // since neither call's `await` had resolved yet to update it.
+      // Deciding synchronously off the immediately-prior optimistic
+      // state means each press always toggles from what the last press
+      // decided, regardless of IPC resolution order.
+      const wasPlaying = get().isPlaying;
+      set({ isPlaying: !wasPlaying });
+      if (wasPlaying) await player.pause();
+      else await player.resume();
     },
 
     seek: async (positionMs) => {
+      const seq = ++seekSeq;
       await player.seek(positionMs);
-      set({ positionMs });
+      if (seq === seekSeq) set({ positionMs });
     },
 
     setVolume: async (volume) => {
+      const seq = ++volumeSeq;
       await player.setVolume(volume);
-      set({ volume });
+      if (seq === volumeSeq) set({ volume });
     },
 
     setMuted: async (muted) => {
+      const seq = ++mutedSeq;
       await player.setMuted(muted);
-      set({ muted });
+      if (seq === mutedSeq) set({ muted });
     },
 
     toggleFavorite: async () => {

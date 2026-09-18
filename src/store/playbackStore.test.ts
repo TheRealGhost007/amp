@@ -158,6 +158,79 @@ describe("playbackStore history / playPrevious", () => {
   });
 });
 
+describe("playbackStore transport controls' race guards", () => {
+  beforeEach(() => {
+    usePlaybackStore.setState({
+      isPlaying: false,
+      positionMs: 0,
+      volume: 1,
+      muted: false,
+    });
+  });
+
+  it("togglePlayPause alternates correctly on two rapid presses even when the first call's IPC reply hasn't resolved yet", async () => {
+    const { player } = await import("../lib/ipc");
+    const pauseCall = deferred<void>();
+    const resumeCall = deferred<void>();
+    vi.mocked(player.pause).mockReturnValueOnce(pauseCall.promise as never);
+    vi.mocked(player.resume).mockReturnValueOnce(resumeCall.promise as never);
+
+    usePlaybackStore.setState({ isPlaying: true });
+    // Two presses fired back-to-back, neither IPC call resolved yet —
+    // before the fix, both read the same pre-await `isPlaying` and sent
+    // the same command twice (two pauses, no resume).
+    const p1 = usePlaybackStore.getState().togglePlayPause();
+    const p2 = usePlaybackStore.getState().togglePlayPause();
+
+    expect(player.pause).toHaveBeenCalledTimes(1);
+    expect(player.resume).toHaveBeenCalledTimes(1);
+    expect(usePlaybackStore.getState().isPlaying).toBe(true);
+
+    pauseCall.resolve();
+    resumeCall.resolve();
+    await p1;
+    await p2;
+  });
+
+  it("seek keeps only the most-recently-initiated call's position when replies resolve out of order", async () => {
+    const { player } = await import("../lib/ipc");
+    const first = deferred<void>();
+    const second = deferred<void>();
+    vi.mocked(player.seek).mockReturnValueOnce(first.promise as never);
+    vi.mocked(player.seek).mockReturnValueOnce(second.promise as never);
+
+    const p1 = usePlaybackStore.getState().seek(1000);
+    const p2 = usePlaybackStore.getState().seek(5000);
+
+    // The older call's reply arrives last — must not clobber the newer
+    // seek's already-applied (or about-to-apply) position.
+    second.resolve();
+    await p2;
+    first.resolve();
+    await p1;
+
+    expect(usePlaybackStore.getState().positionMs).toBe(5000);
+  });
+
+  it("setVolume keeps only the most-recently-initiated call's value when replies resolve out of order", async () => {
+    const { player } = await import("../lib/ipc");
+    const first = deferred<void>();
+    const second = deferred<void>();
+    vi.mocked(player.setVolume).mockReturnValueOnce(first.promise as never);
+    vi.mocked(player.setVolume).mockReturnValueOnce(second.promise as never);
+
+    const p1 = usePlaybackStore.getState().setVolume(0.2);
+    const p2 = usePlaybackStore.getState().setVolume(0.9);
+
+    second.resolve();
+    await p2;
+    first.resolve();
+    await p1;
+
+    expect(usePlaybackStore.getState().volume).toBe(0.9);
+  });
+});
+
 describe("playbackStore.init MPRIS transport routing", () => {
   const trackA = { id: 1, uri: "file:///a.flac" };
   const trackB = { id: 2, uri: "file:///b.flac" };

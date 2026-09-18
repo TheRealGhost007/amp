@@ -84,6 +84,22 @@ impl Database {
         self.conn.execute("DELETE FROM queue", [])?;
         Ok(())
     }
+
+    /// Empties the queue and repopulates it with `track_ids` in order —
+    /// backs "play this track and queue the rest of the list" (Library,
+    /// Album/Artist detail, Playlist detail, Favorites, Recently Played
+    /// all queue whatever comes after the clicked track in that same
+    /// list, replacing whatever was queued before).
+    pub fn replace_queue(&self, track_ids: &[i64]) -> Result<()> {
+        self.conn.execute("DELETE FROM queue", [])?;
+        for (position, track_id) in track_ids.iter().enumerate() {
+            self.conn.execute(
+                "INSERT INTO queue (track_id, position) VALUES (?1, ?2)",
+                params![track_id, position as i64],
+            )?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -173,6 +189,30 @@ mod tests {
         let a = insert_track(&db, "/a.mp3");
         db.add_to_queue(a).unwrap();
         db.clear_queue().unwrap();
+        assert!(db.list_queue_items().unwrap().is_empty());
+    }
+
+    #[test]
+    fn replace_queue_discards_the_old_queue_and_sets_a_new_one_in_order() {
+        let db = Database::open_in_memory().unwrap();
+        let a = insert_track(&db, "/a.mp3");
+        let b = insert_track(&db, "/b.mp3");
+        let c = insert_track(&db, "/c.mp3");
+
+        db.add_to_queue(a).unwrap();
+        db.replace_queue(&[c, b]).unwrap();
+
+        assert_eq!(track_ids(&db.list_queue_items().unwrap()), vec![c, b]);
+    }
+
+    #[test]
+    fn replace_queue_with_an_empty_list_clears_it() {
+        let db = Database::open_in_memory().unwrap();
+        let a = insert_track(&db, "/a.mp3");
+        db.add_to_queue(a).unwrap();
+
+        db.replace_queue(&[]).unwrap();
+
         assert!(db.list_queue_items().unwrap().is_empty());
     }
 }

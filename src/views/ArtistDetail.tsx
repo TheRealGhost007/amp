@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { EmptyState, Icon, MediaRow } from "../components";
 import { useLibrary } from "../context/LibraryContext";
-import { pathToFileUri } from "../lib/ipc";
 import { buildTrackMenuItems } from "../lib/trackMenu";
 import { formatDuration } from "../lib/format";
+import { playListStartingAt } from "../lib/playFromList";
 import { useFavoritesStore } from "../store/favoritesStore";
 import { useNavigationStore } from "../store/navigationStore";
 import { usePlaybackStore } from "../store/playbackStore";
@@ -15,7 +15,6 @@ export function ArtistDetail({ artistId }: { artistId: number }) {
   const backFromArtist = useNavigationStore((s) => s.backFromArtist);
   const favoriteIds = useFavoritesStore((s) => s.ids);
   const toggleFavorite = useFavoritesStore((s) => s.toggle);
-  const playNow = usePlaybackStore((s) => s.playNow);
   const currentTrackId = usePlaybackStore((s) => s.currentTrack?.id);
 
   const artist = artists.find((a) => a.id === artistId);
@@ -61,7 +60,7 @@ export function ArtistDetail({ artistId }: { artistId: number }) {
       </div>
 
       <div className="op-playlist-detail__list">
-        {artistTracks.map((track) => (
+        {artistTracks.map((track, index) => (
           <MediaRow
             key={track.id}
             artworkSeed={`${track.artist_name ?? "Unknown Artist"} — ${track.album_title ?? track.title}`}
@@ -71,7 +70,7 @@ export function ArtistDetail({ artistId }: { artistId: number }) {
             active={track.id === currentTrackId}
             favorite={favoriteIds.has(track.id)}
             onToggleFavorite={() => void toggleFavorite(track.id)}
-            onClick={() => void playNow({ id: track.id, uri: pathToFileUri(track.path) })}
+            onClick={() => void playListStartingAt(artistTracks, index)}
             actions={buildTrackMenuItems(track, {
               onRemovedFromLibrary: () => void refresh(),
               onMetadataUpdated: () => void refresh(),

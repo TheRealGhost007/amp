@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Button, Dialog, EmptyState, Input, MediaRow } from "../components";
 import { useConfirmDialogStore } from "../store/confirmDialogStore";
 import { useNavigationStore } from "../store/navigationStore";
@@ -23,6 +23,14 @@ export function Playlists() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
+
+  // Dialog's focus-trap effect depends on [open, onClose] and refocuses
+  // the dialog's first focusable element every time it re-runs — a
+  // fresh inline closure here would re-run it on every keystroke
+  // (newName changes on every character), yanking focus away from the
+  // input after each letter. Same fix as MetadataEditDialog's
+  // handleClose (Phase 10 bug-hunt).
+  const closeCreate = useCallback(() => setCreateOpen(false), []);
 
   if (selectedId !== null) {
     return <PlaylistDetail playlistId={selectedId} onBack={backFromPlaylist} />;
@@ -92,11 +100,11 @@ export function Playlists() {
 
       <Dialog
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreate}
         title="New Playlist"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+            <Button variant="ghost" onClick={closeCreate}>
               Cancel
             </Button>
             <Button variant="primary" onClick={() => void handleCreate()}>

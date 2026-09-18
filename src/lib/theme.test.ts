@@ -93,6 +93,28 @@ describe("theme", () => {
     expect(document.documentElement.dataset.theme).toBe("omarchy-dark");
   });
 
+  it("a changeTheme call that lands while initializeTheme's read is still in flight is not reverted by initializeTheme's late apply", async () => {
+    // Regression test: initializeTheme() awaits an IPC round-trip before
+    // applying anything. If the user opens Settings and picks a theme
+    // (changeTheme, always synchronous) before that read resolves, the
+    // read's stale saved value previously landed last and silently
+    // reverted the user's own just-made choice.
+    mockMatchMedia(false);
+    let resolveGet!: (value: string | null) => void;
+    getMock.mockReturnValueOnce(new Promise((resolve) => (resolveGet = resolve)));
+
+    const initPromise = initializeTheme();
+    changeTheme("amoled-dark");
+    expect(document.documentElement.dataset.theme).toBe("amoled-dark");
+
+    // initializeTheme's read finally resolves with the old saved value
+    // (from before the user's change) — must not overwrite it.
+    resolveGet("omarchy-light");
+    await initPromise;
+
+    expect(document.documentElement.dataset.theme).toBe("amoled-dark");
+  });
+
   it("staying on 'system' keeps the theme synced with OS preference changes", () => {
     const media = mockMatchMedia(false);
     changeTheme("system");

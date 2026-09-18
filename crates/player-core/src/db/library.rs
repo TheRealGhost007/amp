@@ -71,6 +71,26 @@ impl Database {
             )
             .optional()?
         {
+            // The first-scanned track's year used to stick forever, even
+            // after the user corrected it via the metadata editor — this
+            // function only ever inserted, never updated, so a later
+            // scan/edit's differing `year` was silently discarded and
+            // Browse kept showing the stale original value permanently.
+            // Only a real, different value overwrites; never blank out
+            // an already-known year with an absent one (e.g. a track
+            // missing its own year tag scanned after one that had it).
+            if let Some(new_year) = year {
+                if existing.year != Some(new_year) {
+                    self.conn.execute(
+                        "UPDATE albums SET year = ?1 WHERE id = ?2",
+                        params![new_year, existing.id],
+                    )?;
+                    return Ok(Album {
+                        year: Some(new_year),
+                        ..existing
+                    });
+                }
+            }
             return Ok(existing);
         }
         self.conn.execute(
@@ -387,6 +407,51 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM albums", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn get_or_create_album_updates_a_differing_year_on_an_existing_row() {
+        // Regression test: this function used to only ever insert, never
+        // update — the first-scanned track's year stuck forever, even
+        // after the user corrected it via the metadata editor (which
+        // re-derives the album through this same function on save).
+        let db = Database::open_in_memory().unwrap();
+        let artist = db.get_or_create_artist("Daft Punk").unwrap();
+        let first = db
+            .get_or_create_album("Discovery", Some(artist.id), Some(2001))
+            .unwrap();
+        assert_eq!(first.year, Some(2001));
+
+        let updated = db
+            .get_or_create_album("Discovery", Some(artist.id), Some(1997))
+            .unwrap();
+
+        assert_eq!(updated.id, first.id, "must still be the same album row");
+        assert_eq!(updated.year, Some(1997));
+        let stored: Option<i64> = db
+            .conn
+            .query_row(
+                "SELECT year FROM albums WHERE id = ?1",
+                params![first.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, Some(1997));
+    }
+
+    #[test]
+    fn get_or_create_album_never_blanks_out_a_known_year_with_an_absent_one() {
+        let db = Database::open_in_memory().unwrap();
+        let first = db
+            .get_or_create_album("Discovery", None, Some(2001))
+            .unwrap();
+
+        // A later scan of a track missing its own year tag must not wipe
+        // out the year the album already has.
+        let again = db.get_or_create_album("Discovery", None, None).unwrap();
+
+        assert_eq!(again.id, first.id);
+        assert_eq!(again.year, Some(2001));
     }
 
     #[test]

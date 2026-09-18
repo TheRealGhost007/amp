@@ -80,6 +80,30 @@ describe("favoritesStore", () => {
     expect(useFavoritesStore.getState().ids.has(5)).toBe(false);
   });
 
+  it("a toggle that lands while init's fetch is still in flight is not wiped out by init's late reply", async () => {
+    // Regression test: init() and toggle() previously shared no guard at
+    // all — favoriting a track right at startup, before the initial
+    // listIds() reply arrived, would apply correctly and then get
+    // silently reverted the moment init's own late reply landed.
+    let resolveInit!: (ids: number[]) => void;
+    listIdsMock.mockImplementationOnce(
+      () => new Promise<number[]>((resolve) => (resolveInit = resolve)),
+    );
+    toggleMock.mockResolvedValue(true);
+
+    const initPromise = useFavoritesStore.getState().init();
+    await useFavoritesStore.getState().toggle(5);
+    expect(useFavoritesStore.getState().ids.has(5)).toBe(true);
+
+    // init's fetch finally resolves with a snapshot taken before the
+    // toggle — must not overwrite the toggle's already-applied result.
+    resolveInit([]);
+    await initPromise;
+
+    expect(useFavoritesStore.getState().ids.has(5)).toBe(true);
+    expect(useFavoritesStore.getState().loading).toBe(false);
+  });
+
   it("overlapping toggles of two different tracks never interfere with each other", async () => {
     useFavoritesStore.setState({ ids: new Set() });
     let resolveTrack5!: (value: boolean) => void;

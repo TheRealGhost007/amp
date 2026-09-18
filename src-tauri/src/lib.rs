@@ -207,47 +207,73 @@ fn spawn_mpris_command_loop(
                     }
                 }
                 PlayerCommand::SeekBy(offset_ms) => {
-                    let mut guard = state.player.lock().unwrap();
-                    let Some(player) = guard.as_mut() else {
-                        continue;
-                    };
-                    let target = linux_integration::mpris::apply_seek_offset(
-                        player.position_ms().unwrap_or(0),
-                        player.duration_ms(),
-                        offset_ms,
-                    );
-                    if let Err(e) = player.seek(target) {
-                        tracing::warn!("MPRIS seek failed: {e}");
-                        continue;
-                    }
-                    drop(guard);
-                    if let Some(mpris) = &state.mpris {
-                        mpris.notify_seeked(target);
+                    // `Player::seek` reaches `GstreamerBackend::seek`,
+                    // which does a genuinely blocking
+                    // `playbin.state(timeout)` wait (up to 5s) to settle
+                    // a race with playbin3's async preroll. This command
+                    // loop is a `tauri::async_runtime::spawn`'d async
+                    // task, not a blocking-pool thread — blocking it
+                    // while holding `state.player`'s mutex also blocks
+                    // the 200ms tick loop's own lock attempt, freezing
+                    // position/MPRIS updates for every other command
+                    // queued behind this one. `spawn_blocking` moves the
+                    // lock-and-seek onto a real blocking-pool thread,
+                    // matching `library_add_folder`'s existing pattern
+                    // for the same reason.
+                    let blocking_handle = app_handle.clone();
+                    let outcome = tauri::async_runtime::spawn_blocking(move || {
+                        let state = blocking_handle.state::<AppState>();
+                        let mut guard = state.player.lock().unwrap();
+                        let player = guard.as_mut()?;
+                        let target = linux_integration::mpris::apply_seek_offset(
+                            player.position_ms().unwrap_or(0),
+                            player.duration_ms(),
+                            offset_ms,
+                        );
+                        Some((player.seek(target), target))
+                    })
+                    .await;
+                    match outcome {
+                        Ok(Some((Ok(()), target))) => {
+                            if let Some(mpris) = &state.mpris {
+                                mpris.notify_seeked(target);
+                            }
+                        }
+                        Ok(Some((Err(e), _))) => tracing::warn!("MPRIS seek failed: {e}"),
+                        Ok(None) => {}
+                        Err(e) => tracing::warn!("MPRIS seek task panicked: {e}"),
                     }
                 }
                 PlayerCommand::SetPosition {
                     track_id,
                     position_ms,
                 } => {
-                    let mut guard = state.player.lock().unwrap();
-                    let Some(player) = guard.as_mut() else {
-                        continue;
-                    };
-                    // A stale `SetPosition` for a track that isn't
-                    // playing anymore must be ignored, per the MPRIS
-                    // spec — otherwise a slow client could seek whatever
-                    // happens to be playing by the time its request
-                    // arrives.
-                    if player.current_track().map(|t| t.id) != Some(track_id) {
-                        continue;
-                    }
-                    if let Err(e) = player.seek(position_ms) {
-                        tracing::warn!("MPRIS set-position failed: {e}");
-                        continue;
-                    }
-                    drop(guard);
-                    if let Some(mpris) = &state.mpris {
-                        mpris.notify_seeked(position_ms);
+                    // Same blocking-wait hazard as `SeekBy` above.
+                    let blocking_handle = app_handle.clone();
+                    let outcome = tauri::async_runtime::spawn_blocking(move || {
+                        let state = blocking_handle.state::<AppState>();
+                        let mut guard = state.player.lock().unwrap();
+                        let player = guard.as_mut()?;
+                        // A stale `SetPosition` for a track that isn't
+                        // playing anymore must be ignored, per the MPRIS
+                        // spec — otherwise a slow client could seek
+                        // whatever happens to be playing by the time its
+                        // request arrives.
+                        if player.current_track().map(|t| t.id) != Some(track_id) {
+                            return None;
+                        }
+                        Some(player.seek(position_ms))
+                    })
+                    .await;
+                    match outcome {
+                        Ok(Some(Ok(()))) => {
+                            if let Some(mpris) = &state.mpris {
+                                mpris.notify_seeked(position_ms);
+                            }
+                        }
+                        Ok(Some(Err(e))) => tracing::warn!("MPRIS set-position failed: {e}"),
+                        Ok(None) => {}
+                        Err(e) => tracing::warn!("MPRIS set-position task panicked: {e}"),
                     }
                 }
                 PlayerCommand::SetVolume(volume) => {
@@ -333,6 +359,7 @@ pub fn run() {
             commands::queue::queue_remove,
             commands::queue::queue_reorder,
             commands::queue::queue_clear,
+            commands::queue::queue_replace,
             commands::playlists::playlists_list,
             commands::playlists::playlists_create,
             commands::playlists::playlists_rename,

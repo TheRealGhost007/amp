@@ -2121,6 +2121,106 @@ whether it resolves the failing symbol, using the app's own exact
 runtime environment) rather than retrying flaky automation or accepting
 weaker evidence.
 
+## Post-Phase-17 final bug sweep
+
+All 18 planned phases were done and shipped, then the user asked for one
+more full pass before calling the app truly finished ("clear all bugs
+and make sure its fully useable"), plus reported two live bugs while
+testing it themselves. Handled together as one pass.
+
+**Two user-reported bugs, both real**:
+
+1. **Typing a playlist name only accepted one letter at a time** —
+   `Playlists.tsx`'s `New Playlist` dialog passed `onClose={() =>
+setCreateOpen(false)}`, a fresh closure every render. `Dialog`'s
+   focus-trap effect depends on `[open, onClose]` and refocuses the
+   dialog's first focusable element every time it re-runs; since
+   `newName` changes (and re-renders the view) on every keystroke, every
+   character yanked focus back out of the input. Exactly the same root
+   cause as `MetadataEditDialog`'s Phase 10 bug — this dialog just
+   hadn't been given the same `useCallback` fix. Also fixed
+   `PlaylistDetail.tsx`'s Rename/Edit Description dialogs proactively,
+   since they had the identical pattern.
+2. **Clicking a song didn't play the rest of the library** — every
+   track-listing view (Library, Album/Artist detail, Playlist detail,
+   Favorites, Recently Played) called `playNow` on just the clicked
+   track and never touched the queue, so nothing played after it
+   finished. This was systemic, not a one-off: no view anywhere in the
+   app had ever implemented "queue the rest of the list," the standard
+   behavior every mainstream music player has. Fixed with a new
+   `Database::replace_queue`/`queue_replace` command and a shared
+   `playListStartingAt(tracks, index)` helper (`src/lib/playFromList.ts`)
+   used consistently by all six views: plays the clicked track, then
+   replaces the queue with everything after it in that same list.
+
+**Nine more findings from a fresh 4-way parallel code-review pass**
+(player-core; audio-engine+linux-integration+src-tauri; frontend
+stores/lib; frontend components/views), focused on Phases 15–17's code
+(the newest, least independently reviewed) but not limited to it:
+
+- **Compilation albums fragmented into one single-track "album" per
+  artist.** `process_file` resolved album grouping from the track's own
+  `artist` tag, not `album_artist` — a compilation's tracks each have a
+  _different_ artist but share one `album_artist` ("Various Artists"),
+  and `albums` is keyed `UNIQUE(title, artist_id)`. Fixed by extracting
+  `album_grouping_artist_name()` (prefers `album_artist`, falls back to
+  `artist`) and using it for album resolution instead.
+- **An album's `year` never updated once the row existed**, even after
+  the user corrected it via the metadata editor (which re-derives the
+  album through this same function on save) — `get_or_create_album`
+  only ever inserted, never updated. Fixed to `UPDATE` when a real,
+  differing year is passed, while never blanking out a known year with
+  an absent one.
+- **A blocking GStreamer wait inside the async MPRIS command loop,
+  while holding the player mutex.** `Player::seek` can block for up to
+  5s settling a preroll race; `SeekBy`/`SetPosition` called it directly
+  from `spawn_mpris_command_loop`'s async task while holding
+  `state.player`'s mutex, which also blocks the 200ms tick loop's own
+  lock attempt — an external MPRIS client (`playerctl`, Quickshell's
+  media widget) seeking mid-preroll could freeze position/MPRIS updates
+  for up to 5s. Fixed by moving the lock-and-seek onto
+  `tauri::async_runtime::spawn_blocking`, the same offloading pattern
+  `library_add_folder` already uses.
+- **Four frontend races, same "unguarded await-then-apply" shape this
+  codebase has fixed repeatedly elsewhere**, just not yet ported to
+  these specific spots: `theme.ts`'s `initializeTheme`/`changeTheme` (a
+  user's own theme choice could be silently reverted by a slower,
+  now-stale startup read); `favoritesStore.init()` (unlike every
+  analogous store, had no guard at all against a `toggle()` landing
+  mid-fetch); `playbackStore.togglePlayPause` (read `isPlaying` before
+  its `await`, so two rapid presses could send the same command twice);
+  `seek`/`setVolume`/`setMuted` (no guard at all, reachable via
+  `GlobalShortcuts`' key-repeat on held arrow keys). `togglePlayPause`
+  fixed differently from the others — deciding synchronously off an
+  optimistic pre-await update rather than a sequence counter, since the
+  bug was reading stale state, not applying a stale reply.
+- **Two more instances of the same unguarded-refetch race**,
+  `RecentlyPlayed.tsx`'s and `PlaylistDetail.tsx`'s manually-triggered
+  refresh functions, sitting right next to an already-correctly-guarded
+  mount effect in the same file.
+- **`AddToPlaylistDialog` had no in-flight guard**, unlike its sibling
+  `MetadataEditDialog` — a double-click or double-Enter before the first
+  `addTrack`/`create` call resolved could create a duplicate playlist or
+  add a track twice.
+- **`MediaRow`'s favorite toggle was keyboard-focusable but
+  invisible when focused** — missing the `:focus-visible` opacity rule
+  its neighboring "..." menu trigger already had.
+
+All fixes have regression tests, each verified to fail against a
+reverted version of its fix before being considered done — the two
+album/DB fixes via a scripted revert + `cargo test`, the frontend races
+the same way via `cp`+Python-scripted revert + `vitest run`. One test
+(`RecentlyPlayed.tsx`) needed a narrowly-scoped `eslint-disable` for
+`react-hooks/refs`: bisection confirmed the flagged `useRef`+`useCallback`
+sequence-guard pattern is identical in shape to `PlaylistDetail.tsx`'s
+and `LibraryContext.tsx`'s (neither flagged), and the ref is genuinely
+never read synchronously during render — the most likely explanation is
+that `PlaylistDetail.tsx`'s `dnd-kit` hooks make the React Compiler skip
+deep analysis of that whole component (the same mechanism already
+visible as `Library.tsx`'s pre-existing "Compilation Skipped:
+incompatible library" warning for `useVirtualizer`), which this
+component has no equivalent bailout for.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

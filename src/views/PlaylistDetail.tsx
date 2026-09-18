@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   closestCenter,
   DndContext,
@@ -24,15 +24,11 @@ import {
   SortableRow,
 } from "../components";
 import { useLibrary } from "../context/LibraryContext";
-import {
-  pathToFileUri,
-  playlists as playlistsApi,
-  type PlaylistTrackItem,
-} from "../lib/ipc";
+import { playlists as playlistsApi, type PlaylistTrackItem } from "../lib/ipc";
 import { buildTrackMenuItems } from "../lib/trackMenu";
+import { playListStartingAt } from "../lib/playFromList";
 import { useConfirmDialogStore } from "../store/confirmDialogStore";
 import { useFavoritesStore } from "../store/favoritesStore";
-import { usePlaybackStore } from "../store/playbackStore";
 import { usePlaylistsStore } from "../store/playlistsStore";
 import "./views.css";
 import "./PlaylistDetail.css";
@@ -48,7 +44,6 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
   const rename = usePlaylistsStore((s) => s.rename);
   const setDescription = usePlaylistsStore((s) => s.setDescription);
   const removePlaylist = usePlaylistsStore((s) => s.remove);
-  const playNow = usePlaybackStore((s) => s.playNow);
   const favoriteIds = useFavoritesStore((s) => s.ids);
   const toggleFavorite = useFavoritesStore((s) => s.toggle);
   const refreshLibrary = useLibrary().refresh;
@@ -68,17 +63,38 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [descriptionValue, setDescriptionValue] = useState("");
 
-  function refreshTracks() {
+  // Dialog's focus-trap effect depends on [open, onClose] and refocuses
+  // the dialog's first focusable element every time it re-runs — a
+  // fresh inline closure here would re-run it on every keystroke in the
+  // input below, yanking focus away after each letter. Same fix as
+  // MetadataEditDialog's handleClose (Phase 10 bug-hunt).
+  const closeRename = useCallback(() => setRenameOpen(false), []);
+  const closeDescription = useCallback(() => setDescriptionOpen(false), []);
+
+  // Tauri dispatches commands across a thread pool with no ordering
+  // guarantee, so two overlapping `listTracks` calls (e.g. removing two
+  // tracks from the library in quick succession, each triggering its
+  // own refresh) can resolve out of order. Shared between the
+  // mount/playlistId-change effect and the manually-triggered
+  // `refreshTracks` so a slower, now-superseded reply can never
+  // overwrite state a newer fetch already produced — same pattern as
+  // LibraryContext's `seqRef`.
+  const tracksSeqRef = useRef(0);
+
+  const refreshTracks = useCallback(() => {
+    const seq = ++tracksSeqRef.current;
     playlistsApi.listTracks(playlistId).then((items) => {
+      if (seq !== tracksSeqRef.current) return;
       setTracks(items);
       setLoadedForId(playlistId);
     });
-  }
+  }, [playlistId]);
 
   useEffect(() => {
+    const seq = ++tracksSeqRef.current;
     let cancelled = false;
     playlistsApi.listTracks(playlistId).then((items) => {
-      if (!cancelled) {
+      if (!cancelled && seq === tracksSeqRef.current) {
         setTracks(items);
         setLoadedForId(playlistId);
       }
@@ -199,7 +215,7 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
             strategy={verticalListSortingStrategy}
           >
             <div className="op-playlist-detail__list">
-              {tracks.map((item) => (
+              {tracks.map((item, index) => (
                 <SortableRow key={item.id} id={item.id} label={item.track.title}>
                   <MediaRow
                     artworkSeed={`${item.track.artist_name ?? "Unknown Artist"} — ${item.track.album_title ?? item.track.title}`}
@@ -208,10 +224,10 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
                     favorite={favoriteIds.has(item.track.id)}
                     onToggleFavorite={() => void toggleFavorite(item.track.id)}
                     onClick={() =>
-                      void playNow({
-                        id: item.track.id,
-                        uri: pathToFileUri(item.track.path),
-                      })
+                      void playListStartingAt(
+                        tracks.map((t) => t.track),
+                        index,
+                      )
                     }
                     actions={buildTrackMenuItems(item.track, {
                       extraItems: [
@@ -240,11 +256,11 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
 
       <Dialog
         open={renameOpen}
-        onClose={() => setRenameOpen(false)}
+        onClose={closeRename}
         title="Rename Playlist"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setRenameOpen(false)}>
+            <Button variant="ghost" onClick={closeRename}>
               Cancel
             </Button>
             <Button
@@ -270,11 +286,11 @@ export function PlaylistDetail({ playlistId, onBack }: PlaylistDetailProps) {
 
       <Dialog
         open={descriptionOpen}
-        onClose={() => setDescriptionOpen(false)}
+        onClose={closeDescription}
         title="Edit Description"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setDescriptionOpen(false)}>
+            <Button variant="ghost" onClick={closeDescription}>
               Cancel
             </Button>
             <Button

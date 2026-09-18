@@ -50,3 +50,13 @@ pub fn queue_clear(state: State<AppState>) -> AppResult<()> {
     db.clear_queue()?;
     Ok(())
 }
+
+/// Discards whatever was queued and sets a new queue — backs "play this
+/// track and queue the rest of the list" from Library/Album/Artist/
+/// Playlist/Favorites/Recently Played.
+#[tauri::command]
+pub fn queue_replace(state: State<AppState>, track_ids: Vec<i64>) -> AppResult<()> {
+    let db = state.db.lock().unwrap();
+    db.replace_queue(&track_ids)?;
+    Ok(())
+}

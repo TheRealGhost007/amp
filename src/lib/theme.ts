@@ -44,6 +44,16 @@ function setActiveTheme(mode: ThemeMode): void {
   }
 }
 
+// `initializeTheme` awaits an IPC round-trip before applying anything;
+// if the user opens Settings and picks a theme (`changeTheme`, always
+// synchronous) before that read resolves, the read's stale value would
+// otherwise land last and silently revert the user's own just-made
+// choice — same shape of race this codebase has fixed repeatedly
+// elsewhere (a monotonic counter, bumped by whichever call is the
+// "latest intent," checked before an in-flight call is allowed to
+// apply its result).
+let themeSeq = 0;
+
 /** Restores the saved theme at app startup — called once from App.tsx's
  * init effect. Before this, the app rendered with main.tsx's synchronous
  * `applyTheme("system")` (there only to avoid a flash of default browser
@@ -53,6 +63,7 @@ function setActiveTheme(mode: ThemeMode): void {
  * value — so any other theme choice never actually took effect until
  * that visit. */
 export async function initializeTheme(): Promise<void> {
+  const seq = ++themeSeq;
   let mode: ThemeMode = "system";
   try {
     const saved = await settings.get<ThemeMode>(THEME_SETTING_KEY);
@@ -61,6 +72,7 @@ export async function initializeTheme(): Promise<void> {
     // Best-effort, same as every other persisted-setting restoration in
     // this app — fall back to the in-memory default.
   }
+  if (seq !== themeSeq) return;
   setActiveTheme(mode);
 }
 
@@ -69,6 +81,7 @@ export async function initializeTheme(): Promise<void> {
  * does, so the system-preference watcher is always for the
  * currently-active mode. */
 export function changeTheme(mode: ThemeMode): void {
+  ++themeSeq;
   setActiveTheme(mode);
   settings.set(THEME_SETTING_KEY, mode).catch(() => {});
 }

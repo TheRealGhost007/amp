@@ -199,6 +199,7 @@ export const queue = {
   remove: (queueItemId: number) => invoke<void>("queue_remove", { queueItemId }),
   reorder: (queueItemIds: number[]) => invoke<void>("queue_reorder", { queueItemIds }),
   clear: () => invoke<void>("queue_clear"),
+  replace: (trackIds: number[]) => invoke<void>("queue_replace", { trackIds }),
 };
 
 export const playlists = {

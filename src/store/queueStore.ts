@@ -11,6 +11,11 @@ interface QueueStore {
   remove: (queueItemId: number) => Promise<void>;
   reorder: (queueItemIds: number[]) => Promise<void>;
   clear: () => Promise<void>;
+  /** Discards whatever was queued and queues `trackIds` in order — used
+   * by "play this track and queue the rest of the list" from every
+   * track-listing view (Library, Album/Artist detail, Playlist detail,
+   * Favorites, Recently Played). */
+  replaceWith: (trackIds: number[]) => Promise<void>;
   /** Removes the current head from the persisted queue and re-syncs the
    * backend's look-ahead slot to the new head — called by
    * `playbackStore` when a `TrackAdvanced` event reports the backend
@@ -118,6 +123,15 @@ export const useQueueStore = create<QueueStore>((set, get) => ({
     await queue.clear();
     set({ items: [] });
     await syncNextWithBackend([]);
+  },
+
+  replaceWith: async (trackIds) => {
+    const seq = ++queueSeq;
+    await queue.replace(trackIds);
+    const items = await queue.list();
+    if (seq !== queueSeq) return;
+    set({ items });
+    await syncNextWithBackend(items);
   },
 
   consumeHead: async () => {

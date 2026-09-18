@@ -25,8 +25,19 @@ export function AddToPlaylistDialog({
   const refreshPlaylists = usePlaylistsStore((s) => s.refresh);
   const { show } = useToast();
   const [newName, setNewName] = useState("");
+  // Neither `addTo` nor `handleCreateAndAdd` disabled anything while
+  // their own `await` was in flight, so a second Enter press or click
+  // before the first IPC round-trip resolved could fire the same
+  // create-or-add call twice (e.g. two identically-named playlists
+  // created from one "Create & Add" double-click). Mirrors
+  // MetadataEditDialog's `saving` guard.
+  const [submitting, setSubmitting] = useState(false);
 
-  async function addTo(playlistId: number, playlistName: string) {
+  // Does the actual add, with no `submitting` check of its own — callers
+  // (both the "pick an existing playlist" click and `handleCreateAndAdd`
+  // below) are responsible for setting `submitting` first, so this can
+  // be safely called from either without a nested guard rejecting it.
+  async function addToPlaylist(playlistId: number, playlistName: string) {
     if (trackId === null) return;
     await playlistsApi.addTrack(playlistId, trackId);
     // playlistsApi.addTrack is a raw IPC call, bypassing the store
@@ -38,12 +49,27 @@ export function AddToPlaylistDialog({
     onClose();
   }
 
+  async function addTo(playlistId: number, playlistName: string) {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await addToPlaylist(playlistId, playlistName);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleCreateAndAdd() {
     const name = newName.trim();
-    if (!name || trackId === null) return;
-    const id = await createPlaylist(name);
-    setNewName("");
-    await addTo(id, name);
+    if (!name || trackId === null || submitting) return;
+    setSubmitting(true);
+    try {
+      const id = await createPlaylist(name);
+      setNewName("");
+      await addToPlaylist(id, name);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -55,6 +81,7 @@ export function AddToPlaylistDialog({
               <li key={playlist.id}>
                 <button
                   className="op-add-to-playlist__item"
+                  disabled={submitting}
                   onClick={() => void addTo(playlist.id, playlist.name)}
                 >
                   {playlist.name}
@@ -72,8 +99,13 @@ export function AddToPlaylistDialog({
             onKeyDown={(e) => {
               if (e.key === "Enter") void handleCreateAndAdd();
             }}
+            disabled={submitting}
           />
-          <Button variant="secondary" onClick={() => void handleCreateAndAdd()}>
+          <Button
+            variant="secondary"
+            disabled={submitting}
+            onClick={() => void handleCreateAndAdd()}
+          >
             Create &amp; Add
           </Button>
         </div>

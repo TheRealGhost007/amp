@@ -4,8 +4,9 @@ import { Button, EmptyState, Input, MediaRow } from "../components";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlaybackStore } from "../store/playbackStore";
 import { useFavoritesStore } from "../store/favoritesStore";
-import { library, pathToFileUri, type TrackListItem } from "../lib/ipc";
+import { library, type TrackListItem } from "../lib/ipc";
 import { buildTrackMenuItems } from "../lib/trackMenu";
+import { playListStartingAt } from "../lib/playFromList";
 import { formatDuration } from "../lib/format";
 import { ViewHeader } from "./ViewHeader";
 import "./views.css";
@@ -16,7 +17,6 @@ const ROW_HEIGHT = 56;
 
 export function Library() {
   const { tracks, loading, addFolder, refresh } = useLibrary();
-  const playNow = usePlaybackStore((s) => s.playNow);
   const currentTrackId = usePlaybackStore((s) => s.currentTrack?.id);
   const favoriteIds = useFavoritesStore((s) => s.ids);
   const toggleFavorite = useFavoritesStore((s) => s.toggle);
@@ -63,8 +63,13 @@ export function Library() {
     overscan: 12,
   });
 
-  async function handlePlay(track: TrackListItem) {
-    await playNow({ id: track.id, uri: pathToFileUri(track.path) });
+  async function handlePlay(index: number) {
+    // Plays the clicked track and queues the rest of the currently
+    // displayed list (search results, if a search is active — same
+    // list the user is actually looking at) so playback continues past
+    // one song instead of stopping dead, matching every other
+    // track-listing view.
+    await playListStartingAt(displayedTracks, index);
   }
 
   if (!loading && tracks.length === 0) {
@@ -145,7 +150,7 @@ export function Library() {
                     active={track.id === currentTrackId}
                     favorite={favoriteIds.has(track.id)}
                     onToggleFavorite={() => void toggleFavorite(track.id)}
-                    onClick={() => handlePlay(track)}
+                    onClick={() => void handlePlay(virtualRow.index)}
                     actions={buildTrackMenuItems(track, {
                       onRemovedFromLibrary: () => void refresh(),
                       onMetadataUpdated: () => void refresh(),

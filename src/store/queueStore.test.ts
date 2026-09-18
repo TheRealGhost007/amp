@@ -7,6 +7,7 @@ const playNextMock = vi.fn();
 const removeMock = vi.fn();
 const reorderMock = vi.fn();
 const clearMock = vi.fn();
+const replaceMock = vi.fn();
 const setNextMock = vi.fn();
 
 vi.mock("../lib/ipc", () => ({
@@ -21,6 +22,7 @@ vi.mock("../lib/ipc", () => ({
     remove: (...args: unknown[]) => removeMock(...args),
     reorder: (...args: unknown[]) => reorderMock(...args),
     clear: (...args: unknown[]) => clearMock(...args),
+    replace: (...args: unknown[]) => replaceMock(...args),
   },
 }));
 
@@ -57,6 +59,7 @@ describe("queueStore", () => {
     removeMock.mockReset();
     reorderMock.mockReset();
     clearMock.mockReset();
+    replaceMock.mockReset();
     setNextMock.mockReset();
     useQueueStore.setState({ items: [], loading: false });
   });
@@ -160,6 +163,39 @@ describe("queueStore", () => {
     await addCall;
 
     expect(useQueueStore.getState().items).toEqual([item(10, 1, "/a.flac")]);
+  });
+
+  it("replaceWith discards the old queue and syncs the backend to the new head", async () => {
+    useQueueStore.setState({ items: [item(10, 1, "/a.flac")] });
+    replaceMock.mockResolvedValue(undefined);
+    listMock.mockResolvedValueOnce([item(20, 2, "/b.flac"), item(21, 3, "/c.flac")]);
+
+    await useQueueStore.getState().replaceWith([2, 3]);
+
+    expect(replaceMock).toHaveBeenCalledWith([2, 3]);
+    expect(useQueueStore.getState().items).toEqual([
+      item(20, 2, "/b.flac"),
+      item(21, 3, "/c.flac"),
+    ]);
+    expect(setNextMock).toHaveBeenCalledWith({ id: 2, uri: "file:///b.flac" });
+  });
+
+  it("a slower, superseded replaceWith reply does not overwrite a newer action's result", async () => {
+    let resolveFirstList!: (items: QueueTrackItem[]) => void;
+    listMock.mockImplementationOnce(
+      () => new Promise<QueueTrackItem[]>((resolve) => (resolveFirstList = resolve)),
+    );
+    replaceMock.mockResolvedValue(undefined);
+    clearMock.mockResolvedValue(undefined);
+
+    const replaceCall = useQueueStore.getState().replaceWith([1, 2]);
+    await useQueueStore.getState().clear();
+    expect(useQueueStore.getState().items).toEqual([]);
+
+    resolveFirstList([item(10, 1, "/a.flac"), item(11, 2, "/b.flac")]);
+    await replaceCall;
+
+    expect(useQueueStore.getState().items).toEqual([]);
   });
 
   it("does not throw when the backend's next slot can't be armed (e.g. audio unavailable)", async () => {

@@ -180,6 +180,17 @@ impl ProcessedFile {
     }
 }
 
+/// Which artist name an album should be grouped under: `album_artist`
+/// when present, falling back to the track's own `artist` only when
+/// `album_artist` is absent. A compilation's tracks each have a
+/// *different* `artist` tag but share one `album_artist` ("Various
+/// Artists"); grouping on the track's own artist instead (as this used
+/// to) fragmented one physical album into one single-track "album" per
+/// artist, since `albums` is keyed `UNIQUE(title, artist_id)`.
+fn album_grouping_artist_name(meta: &metadata::TrackMetadata) -> Option<&str> {
+    meta.album_artist.as_deref().or(meta.artist.as_deref())
+}
+
 /// Reads metadata + resolves artwork for one file, and returns a
 /// `NewTrack` ready to insert or update. The only fallible step exposed
 /// to the caller is metadata parsing; DB writes (get-or-create
@@ -202,9 +213,13 @@ pub(crate) fn process_file(
         Some(name) => Some(db.get_or_create_genre(name).map_err(|e| e.to_string())?.id),
         None => None,
     };
+    let album_artist_id = match album_grouping_artist_name(&meta) {
+        Some(name) => Some(db.get_or_create_artist(name).map_err(|e| e.to_string())?.id),
+        None => None,
+    };
     let album_id = match &meta.album {
         Some(title) => Some(
-            db.get_or_create_album(title, artist_id, meta.year.map(i64::from))
+            db.get_or_create_album(title, album_artist_id, meta.year.map(i64::from))
                 .map_err(|e| e.to_string())?
                 .id,
         ),
@@ -394,6 +409,44 @@ mod tests {
         let b = Path::new("/music/two.flac");
         assert_eq!(hash_path(a), hash_path(a));
         assert_ne!(hash_path(a), hash_path(b));
+    }
+
+    fn test_meta(artist: Option<&str>, album_artist: Option<&str>) -> metadata::TrackMetadata {
+        metadata::TrackMetadata {
+            title: "Title".into(),
+            artist: artist.map(String::from),
+            album: Some("Album".into()),
+            album_artist: album_artist.map(String::from),
+            genre: None,
+            track_number: None,
+            disc_number: None,
+            year: None,
+            duration_ms: 0,
+            embedded_art: None,
+        }
+    }
+
+    #[test]
+    fn album_grouping_prefers_album_artist_over_the_track_s_own_artist() {
+        // Regression test: a compilation's tracks each have a different
+        // `artist` tag but share one `album_artist` ("Various Artists").
+        // Grouping on the track's own artist instead of album_artist
+        // fragmented one physical album into one single-track "album"
+        // per artist, since `albums` is keyed UNIQUE(title, artist_id).
+        let meta = test_meta(Some("Artist One"), Some("Various Artists"));
+        assert_eq!(album_grouping_artist_name(&meta), Some("Various Artists"));
+    }
+
+    #[test]
+    fn album_grouping_falls_back_to_artist_when_album_artist_is_absent() {
+        let meta = test_meta(Some("Solo Artist"), None);
+        assert_eq!(album_grouping_artist_name(&meta), Some("Solo Artist"));
+    }
+
+    #[test]
+    fn album_grouping_is_none_when_neither_tag_is_present() {
+        let meta = test_meta(None, None);
+        assert_eq!(album_grouping_artist_name(&meta), None);
     }
 
     fn test_track(path: &str, content_hash: Option<&str>) -> crate::db::models::Track {
