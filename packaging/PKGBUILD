@@ -21,6 +21,19 @@ sha256sums=('SKIP')
 
 build() {
   cd "amp-$pkgver"
+  # makepkg.conf's default LDFLAGS includes -Wl,--as-needed (C-oriented
+  # hardening) — Rust's own toolchain applies its own appropriate
+  # hardening by default and doesn't need this, and it actively breaks
+  # this build: rusqlite's "bundled" feature compiles SQLite's C source
+  # into a static archive via the `cc` crate, which honors CFLAGS/
+  # LDFLAGS from the environment, and --as-needed can make the linker
+  # discard that archive as "unneeded" (it's referenced only via a
+  # cargo:rustc-link-lib directive, not a positional object on the link
+  # line), producing undefined `sqlite3_*` symbol errors despite the
+  # archive having compiled successfully. Verified by reproducing this
+  # exact failure under plain `LDFLAGS` env and confirming a clean
+  # `cargo build` with no such flags set succeeds.
+  unset CFLAGS CXXFLAGS LDFLAGS
   npm ci
   npm run tauri build -- --no-bundle
 }
