@@ -2297,6 +2297,29 @@ two and startup restoration) and `AppearanceSettings.tsx`'s own UI
 wiring (6 tests) separately, matching this project's established
 two-layer coverage (logic in the lib, wiring in the component).
 
+## Post-Phase-17 Home view: real data, not a permanent stub
+
+User-reported bug: Home showed the "Nothing to play yet" empty state
+unconditionally, even with a populated library, real favorites, and
+real playback history. Root cause: `Home.tsx` had been a hardcoded
+`EmptyState` since Phase 5, whose own plan explicitly called for
+"data can still be sparse/mock where later phases fill it in" — Favorites
+and Recently Played did get built with real data in Phase 9, but nothing
+ever came back to wire Home itself up to it, so it stayed permanently
+stuck at its Phase 5 placeholder regardless of library state.
+
+Fixed by building a real dashboard: a "Recently Played" section
+(`history.listRecent()`, same call `RecentlyPlayed.tsx` uses) and a
+"Favorites" section (`useLibrary().tracks` filtered by
+`useFavoritesStore().ids`, same derivation `Favorites.tsx` uses), each
+showing up to 5 tracks with a "See all" link to the full view, each row
+using `playListStartingAt` for the same click-to-play-and-queue-the-rest
+behavior every other list in the app now has. The full `EmptyState` is
+now conditional — shown only when the library itself is genuinely
+empty; a populated library with no plays/favorites yet shows a lighter
+per-section message instead, so the rest of the dashboard (and
+navigation) stays usable on a fresh library.
+
 ## Phase 0 status
 
 Scaffolding complete: workspace builds, typechecks, lints, formats, and

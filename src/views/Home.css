@@ -1,0 +1,21 @@
+.op-home-section {
+  padding: var(--space-md) 0;
+}
+
+.op-home-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-sm);
+}
+
+.op-home-section__title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: var(--font-weight-semibold);
+}
+
+.op-home-section__list {
+  display: flex;
+  flex-direction: column;
+}
